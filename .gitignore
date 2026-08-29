@@ -6,4 +6,4 @@ venv/
 .env
 output/
 *.mmdb
-logs/
+logs/tests/ 
