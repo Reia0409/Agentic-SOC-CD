@@ -1,121 +1,69 @@
-from __future__ import annotations
+"""조사 에이전트 실행 예시.
 
-import argparse
+실제로 돌려보려면:
+1. `pip install -r requirements.txt`
+2. Gemini(기본값, 무료 티어 가능): Google AI Studio(aistudio.google.com)에서 API 키 발급 후
+   `export GEMINI_API_KEY=...`
+   Claude로 돌리고 싶으면 `export LLM_PROVIDER=anthropic` + `export ANTHROPIC_API_KEY=...`
+3. build_default_registry(handlers={...})에 팀원들이 구현한 실제 fetch_* 함수를 연결
+   (미연결 상태면 mock_tools.py의 목업 데이터로 동작)
+4. .env에 AWS 자격 증명 + HOST(S3 파티션의 host= 값)를 채워야 raw log ingestion이 동작함
+
+Triage/감지 에이전트가 파이프라인에서 빠졌기 때문에, seed를 직접 만들어 넣던 예전 방식
+대신 raw log부터 시작하는 전체 파이프라인(agent.pipeline.run_investigation_pipeline)을 쓴다.
+"""
+
 import json
 import os
-import sys
-from datetime import datetime, timedelta
-from pathlib import Path
 
-from agent.anthropic_provider import AnthropicProvider
-from agent.models import AnalysisWindow
-from agent.runner import AgentRunError, DetectionAgentRunner
-from agent.storage import save_outcome
-from agent.tooling import RegistryToolCatalog
+from dotenv import load_dotenv
+
+from agent import ClaudeClient, GeminiClient, build_default_registry, run_investigation_pipeline
+from agent.report import format_text_report
+
+load_dotenv()  # .env 파일에서 GEMINI_API_KEY / ANTHROPIC_API_KEY / HOST 등을 읽어온다
 
 
-def main() -> int:
-    _configure_console_encoding()
-    _load_env_file(Path(__file__).resolve().parent / ".env")
-    parser = _build_parser()
-    args = parser.parse_args()
-    try:
-        window = _resolve_window(args)
-        tools = RegistryToolCatalog()
-        provider = AnthropicProvider(
-            api_key=os.getenv("ANTHROPIC_API_KEY"),
-            model=args.model,
-            max_tokens=args.max_tokens,
-        )
-        runner = DetectionAgentRunner(
-            provider=provider,
-            tools=tools,
-            max_steps=args.max_steps,
-            max_submission_retries=args.max_submission_retries,
-        )
-        outcome = runner.run(window)
-        destination = save_outcome(outcome, args.output_dir)
-    except (ValueError, RuntimeError, ImportError, AgentRunError) as exc:
-        print(f"실행 실패: {exc}", file=sys.stderr)
-        return 1
-
-    summary = {
-        "run_id": outcome.detection.run_id,
-        "status": outcome.detection.status,
-        "observed_ip_count": outcome.detection.observed_ip_count,
-        "investigation_request_count": len(outcome.investigations),
-        "usage": outcome.usage.to_dict(),
-        "output_file": str(destination.resolve()),
-    }
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
-    if outcome.detection.status == "partial":
-        # 판정을 못 받았어도 기록은 저장됐다. cron·모니터링이 구분할 수 있게 1을 돌려준다.
-        print(f"미완료: {outcome.detection.summary}", file=sys.stderr)
-        return 1
-    return 0
+def build_llm_client():
+    """LLM_PROVIDER 환경변수로 Gemini/Claude를 선택한다. 기본값은 gemini."""
+    provider = os.environ.get("LLM_PROVIDER", "gemini").lower()
+    if provider == "anthropic":
+        return ClaudeClient()  # ANTHROPIC_API_KEY 환경변수 필요
+    if provider == "gemini":
+        return GeminiClient()  # GEMINI_API_KEY 환경변수 필요 (무료 티어 가능)
+    raise ValueError(f"알 수 없는 LLM_PROVIDER입니다: {provider} (gemini 또는 anthropic만 지원)")
 
 
-def _load_env_file(path: Path) -> None:
-    """`.env`를 읽어 환경 변수로 올린다. 이미 설정된 값은 덮지 않는다.
+def main() -> None:
+    # S3 파티션의 host= 값과 반드시 일치해야 함 (예: "library-web-01"이 아니라 "web-01")
+    host = os.environ.get("HOST", "web-01")
+    minutes = int(os.environ.get("RAW_LOG_WINDOW_MINUTES", "10"))
 
-    cron은 로그인 셸을 거치지 않아 `~/.bashrc`의 export를 보지 못한다.
-    파일에서 읽는 이 경로가 cron 환경에서 API 키를 전달하는 확실한 방법이다.
-    """
-    if not path.exists():
+    # resolve_ip_geo는 실제 구현은 있지만 지금 우선순위가 아니라서 제외해둔다.
+    # get_process_tree는 2026-09-14에 실제 구현 완성돼서 제외 목록에서 뺐다.
+    tool_registry = build_default_registry(exclude=["resolve_ip_geo"])
+    llm_client = build_llm_client()
+
+    results = run_investigation_pipeline(
+        host=host,
+        llm_client=llm_client,
+        tool_registry=tool_registry,
+        minutes=minutes,
+        max_calls=8,
+        confidence_threshold=0.85,
+    )
+
+    if not results:
+        print(f"최근 {minutes}분 동안 {host}에서 조사할 만한 seed 후보가 없었습니다.")
         return
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key, value = key.strip(), value.strip().strip("\"'")
-        if value and key not in os.environ:
-            os.environ[key] = value
 
+    for i, result in enumerate(results, start=1):
+        print(f"\n{'='*10} 조사 {i}/{len(results)} — {result['incident_id']} {'='*10}")
+        print(format_text_report(result))
 
-def _configure_console_encoding() -> None:  # 한글 깨짐 방지
-    for stream in (sys.stdout, sys.stderr):
-        reconfigure = getattr(stream, "reconfigure", None)
-        if callable(reconfigure):
-            reconfigure(encoding="utf-8", errors="replace")
-
-
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Agentic SOC 감지 에이전트 실행")
-    parser.add_argument("--start", help="분석 시작 ISO 8601 시간")
-    parser.add_argument("--end", help="분석 종료 ISO 8601 시간")
-    parser.add_argument("--minutes", type=int, default=10, help="기본 분석 구간(분)")
-    parser.add_argument("--model", default="claude-sonnet-5", help="Anthropic 모델 ID")
-    parser.add_argument("--max-steps", type=int, default=12, help="최대 LLM 반복 단계")
-    parser.add_argument(
-        "--max-submission-retries", type=int, default=3, help="최종 제출 검증 실패 시 재시도 한도"
-    )
-    parser.add_argument(
-        "--max-tokens", type=int, default=16384,
-        help="호출당 최대 출력 토큰. 관측 IP 가 많으면 제출이 잘릴 수 있어 넉넉히 잡는다",
-    )
-    parser.add_argument("--output-dir", default="output", help="결과 JSON 저장 폴더")
-    return parser
-
-
-def _resolve_window(args: argparse.Namespace) -> AnalysisWindow:    # 분석 시간 구간 결정
-    if bool(args.start) != bool(args.end):
-        raise ValueError("--start와 --end는 함께 지정해야 합니다.")
-    if args.start and args.end:
-        return AnalysisWindow(start=_parse_datetime(args.start), end=_parse_datetime(args.end))
-    if args.minutes <= 0:
-        raise ValueError("--minutes는 1 이상이어야 합니다.")
-    end = datetime.now().astimezone()
-    return AnalysisWindow(start=end - timedelta(minutes=args.minutes), end=end)
-
-
-def _parse_datetime(value: str) -> datetime:        # 실행 시 인자로 시간을 지정해줬을 때만 호출되는 함수
-    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
-    parsed = datetime.fromisoformat(normalized)
-    if parsed.tzinfo is None:
-        raise ValueError(f"시간대가 없는 시간입니다: {value}")
-    return parsed
+    print("\n--- 원본 JSON (raw investigation_result 리스트) ---")
+    print(json.dumps(results, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()

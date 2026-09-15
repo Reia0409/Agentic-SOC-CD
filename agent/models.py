@@ -1,143 +1,147 @@
+"""State / Evidence 관리 담당 모듈.
+
+조사 과정에서 쌓이는 facts / hypothesis / unknowns / evidence / 조사 이력을
+하나의 AgentState 객체로 관리한다. Agent Loop(loop.py)는 매 사이클마다
+이 State를 읽고, LLM 판단 결과로 갱신한다.
+"""
+
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any, Literal, Mapping
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 
-JsonObject = dict[str, Any]
+class VerdictType(str, Enum):
+    THREAT_CONFIRMED = "THREAT_CONFIRMED"
+    FALSE_POSITIVE = "FALSE_POSITIVE"
+    INCONCLUSIVE = "INCONCLUSIVE"
 
 
-@dataclass(frozen=True)
-class TextBlock:
-    text: str
+class TerminationReason(str, Enum):
+    CONFIDENCE_SUFFICIENT = "confidence_sufficient"
+    NO_MORE_EVIDENCE = "no_more_evidence"
+    MAX_CALL_REACHED = "max_call_reached"
 
 
-@dataclass(frozen=True)
-class ToolCallBlock:
-    id: str
-    name: str
-    arguments: Mapping[str, Any]
+_evidence_counter = itertools.count(1)
 
 
-@dataclass(frozen=True)
-class ToolResultBlock:
-    tool_call_id: str
-    name: str
-    result: Mapping[str, Any]
-    is_error: bool = False
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-MessageBlock = TextBlock | ToolCallBlock | ToolResultBlock
+@dataclass
+class Evidence:
+    """조사 중 확보한 증거 하나. 지지/반박 증거 모두 이 클래스로 표현한다."""
+
+    evidence_id: str
+    sequence: int
+    time: Optional[str]
+    layer: str
+    event_type: str
+    description: str
+    source_log: str
+    supporting_hypothesis: List[str] = field(default_factory=list)
+    contradicting_hypothesis: List[str] = field(default_factory=list)
+    confidence_contribution: float = 0.0
+
+    @classmethod
+    def new(cls, sequence: int, **kwargs: Any) -> "Evidence":
+        eid = f"EVID-{next(_evidence_counter):03d}"
+        return cls(evidence_id=eid, sequence=sequence, **kwargs)
 
 
-@dataclass(frozen=True)
-class Message:
-    role: Literal["user", "assistant"]
-    content: str | tuple[MessageBlock, ...]
+@dataclass
+class Hypothesis:
+    hyp_id: str
+    title: str
+    description: str
+    confidence: float
+    status: str = "active"  # active | confirmed | rejected
 
 
-@dataclass(frozen=True)
-class TokenUsage:
-    input_tokens: int = 0
-    output_tokens: int = 0
+@dataclass
+class ToolCallRecord:
+    sequence: int
+    tool_name: str
+    input: Dict[str, Any]
+    result_count: int
+    result_summary: str
+    success: bool = True
+    error: Optional[str] = None
+    timestamp: str = field(default_factory=_now_iso)
 
-    def __add__(self, other: "TokenUsage") -> "TokenUsage":
-        return TokenUsage(
-            input_tokens=self.input_tokens + other.input_tokens,
-            output_tokens=self.output_tokens + other.output_tokens,
+
+@dataclass
+class ConfidenceStep:
+    stage: str
+    confidence: float
+    reason: str
+
+
+@dataclass
+class AgentState:
+    """조사 진행 상태 전체를 담는 컨테이너.
+
+    facts / hypotheses / unknowns 는 문서의 Stage 1 산출물에 대응하고,
+    evidence / tool_calls / confidence_progression 은 Stage 3 및 반복 결과를 누적한다.
+    """
+
+    incident_id: str
+    seed: Dict[str, Any]
+
+    facts: List[str] = field(default_factory=list)
+    hypotheses: Dict[str, Hypothesis] = field(default_factory=dict)
+    unknowns: List[str] = field(default_factory=list)
+
+    evidence: List[Evidence] = field(default_factory=list)
+    contradicting_evidence: List[Evidence] = field(default_factory=list)
+
+    tool_calls: List[ToolCallRecord] = field(default_factory=list)
+    called_signatures: Set[Tuple[str, Tuple[Tuple[str, Any], ...]]] = field(default_factory=set)
+
+    confidence_progression: List[ConfidenceStep] = field(default_factory=list)
+    current_confidence: float = 0.0
+
+    investigated_layers: Set[str] = field(default_factory=set)
+    notes: List[str] = field(default_factory=list)
+    attack_timeline: List[Dict[str, Any]] = field(default_factory=list)
+
+    # 직전 tool call 결과 중 아직 LLM이 해석(증거화)하지 않은 원본 결과.
+    # 매 reason() 호출 뒤 loop.py에서 비운다.
+    pending_observations: List[Dict[str, Any]] = field(default_factory=list)
+
+    # ------------------------------------------------------------------
+    # 중복 조사 방지
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _signature(tool_name: str, args: Dict[str, Any]) -> Tuple[str, Tuple[Tuple[str, Any], ...]]:
+        return (tool_name, tuple(sorted(args.items())))
+
+    def already_called(self, tool_name: str, args: Dict[str, Any]) -> bool:
+        return self._signature(tool_name, args) in self.called_signatures
+
+    def mark_called(self, tool_name: str, args: Dict[str, Any]) -> None:
+        self.called_signatures.add(self._signature(tool_name, args))
+
+    # ------------------------------------------------------------------
+    # 증거 / 신뢰도 관리
+    # ------------------------------------------------------------------
+    def add_evidence(self, ev: Evidence, contradicting: bool = False) -> None:
+        if contradicting:
+            self.contradicting_evidence.append(ev)
+        else:
+            self.evidence.append(ev)
+        self.investigated_layers.add(ev.layer)
+
+    def record_confidence(self, stage: str, reason: str) -> None:
+        self.confidence_progression.append(
+            ConfidenceStep(stage=stage, confidence=round(self.current_confidence, 3), reason=reason)
         )
 
-    def to_dict(self) -> JsonObject:
-        return {
-            "input_tokens": self.input_tokens,
-            "output_tokens": self.output_tokens,
-        }
-
-
-@dataclass(frozen=True)
-class AgentTurn:
-    blocks: tuple[TextBlock | ToolCallBlock, ...]
-    stop_reason: str
-    usage: TokenUsage = field(default_factory=TokenUsage)
-
-    @property
-    def tool_calls(self) -> tuple[ToolCallBlock, ...]:
-        return tuple(block for block in self.blocks if isinstance(block, ToolCallBlock))
-
-    @property
-    def text(self) -> str:
-        return "\n".join(
-            block.text for block in self.blocks if isinstance(block, TextBlock)
-        ).strip()
-
-
-@dataclass(frozen=True)
-class AnalysisWindow:
-    start: datetime
-    end: datetime
-
-    def __post_init__(self) -> None:
-        if self.start.tzinfo is None or self.end.tzinfo is None:
-            raise ValueError("분석 시간은 시간대 정보가 포함되어야 합니다.")
-        if self.start >= self.end:
-            raise ValueError("분석 시작 시간은 종료 시간보다 빨라야 합니다.")
-
-    def to_dict(self) -> JsonObject:
-        return {
-            "start": self.start.isoformat(),
-            "end": self.end.isoformat(),
-        }
-
-
-@dataclass(frozen=True)
-class DetectionRun:
-    run_id: str
-    source_agent: str
-    created_at: str
-    window: AnalysisWindow
-    status: str
-    summary: str
-    observed_ip_count: int
-    assessments: tuple[JsonObject, ...]
-
-    def to_dict(self) -> JsonObject:
-        return {
-            "run_id": self.run_id,
-            "source_agent": self.source_agent,
-            "created_at": self.created_at,
-            "window": self.window.to_dict(),
-            "status": self.status,
-            "summary": self.summary,
-            "observed_ip_count": self.observed_ip_count,
-            "assessments": list(self.assessments),
-        }
-
-
-@dataclass(frozen=True)
-class InvestigationRequest:
-    request_id: str
-    detection_run_id: str
-    source_agent: str
-    created_at: str
-    window: AnalysisWindow
-    target: JsonObject
-    assessment: JsonObject
-    evidence: tuple[JsonObject, ...]
-    enrichment: JsonObject
-    requested_checks: tuple[str, ...]
-
-    def to_dict(self) -> JsonObject:
-        return {
-            "request_id": self.request_id,
-            "detection_run_id": self.detection_run_id,
-            "source_agent": self.source_agent,
-            "created_at": self.created_at,
-            "window": self.window.to_dict(),
-            "target": self.target,
-            "assessment": self.assessment,
-            "evidence": list(self.evidence),
-            "enrichment": self.enrichment,
-            "requested_checks": list(self.requested_checks),
-        }
-
+    def update_confidence(self, delta: float, stage: str, reason: str) -> None:
+        self.current_confidence = max(0.0, min(1.0, self.current_confidence + delta))
+        self.record_confidence(stage, reason)
