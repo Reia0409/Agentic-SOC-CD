@@ -10,12 +10,8 @@ Seed -> LLM 판단 -> Tool 선택/실행 -> 결과 관찰 -> 재판단 -> 종료
 *** 2026-09-17 업데이트 (멘토링 2.2 조사 규율 강화 반영) ***
 1. 종료 관문 도입: termination_reason이 "confidence_sufficient"인 경우에 한해,
    실제 current_confidence가 threshold 미만이거나 서로 다른 tool_name이 1종류
-   이하면 종료를 거부하고 추가 조사를 강제한다. ("no_more_evidence" 종료는
-   계층 수와 무관하게 LLM 판단을 존중. unknowns가 남아있는 것 자체도 차단
-   사유 아님 — remaining_unknowns로 후속 과제를 보고서에 남긴 채 정상 종료하는
-   것은 허용되는 정상 흐름.)
-2. confidence_threshold를 prompts.py/gemini_client.py를 통해 매 턴 LLM에게
-   노출한다.
+   이하면 종료를 거부하고 추가 조사를 강제한다.
+2. confidence_threshold를 prompts.py/gemini_client.py를 통해 매 턴 LLM에게 노출한다.
 3. max_call 도달 시, 도구 호출 없이 판정만 요청하는 마무리 턴(force_terminate=True)을
    1회 추가로 호출한다. 그래도 final_verdict가 없으면 _derive_fallback_verdict()로
    자체 계산한 verdict를 최후 안전망으로 사용한다.
@@ -23,26 +19,22 @@ Seed -> LLM 판단 -> Tool 선택/실행 -> 결과 관찰 -> 재판단 -> 종료
    담아 다음 턴 프롬프트(raw_observations_since_last_turn)에 실리도록 한다.
 
 *** 2026-09-17 추가 업데이트 (종료 관문 무한 거부 루프 버그 수정) ***
-실제 실행(main.py)에서 종료 관문이 같은 사유로 8번 연속 거부되며 max_cycles를
-거의 다 소진하는 현상을 발견했다. 원인: 게이트가 종료를 거부하면 state.notes에만
-기록되는데, build_user_prompt()의 payload엔 notes 필드가 없어서 LLM이 자신이
-거부당했다는 사실 자체를 알 방법이 없었다 — 그래서 매 턴 동일한 상태를 보고
-동일하게 "confidence 충분, 종료"를 반복 요청했다. 수정 내용:
-  a. 게이트 거부 시 그 사유(gate_rejection_reason)를 다음 llm_client.reason() 호출에
-     실어 보내서, prompts.py가 "직전 종료 시도가 거부됐다"는 사실과 이유를 명시적으로
-     알리도록 했다.
-  b. 그래도 동일 사유로 연속 2회 거부되면(LLM이 새 도구를 못 찾거나 confidence
-     재평가도 안 하는 경우), 사이클을 낭비하지 않고 즉시 강제 종료 턴(force_terminate)으로
-     전환해 지금까지의 증거로 판정을 확정짓는다.
+게이트 거부 시 그 사유(gate_rejection_reason)를 다음 llm_client.reason() 호출에
+실어 보내서 LLM이 거부당한 사실을 알게 했다. 동일 사유로 연속 2회 거부되면
+사이클을 낭비하지 않고 즉시 강제 종료 턴으로 전환한다.
 
 *** 2026-09-17 추가 업데이트 (조사 고도화: src_ip 계층 강제 + 판단 근거 명시) ***
-1. seed에 src_ip가 있는(외부 IP 관련 의심) 사건인데 fetch_network_log를 한 번도
-   호출하지 않은 채 confidence_sufficient로 종료하려 하면 게이트가 거부한다.
-   실제 실행에서 이 계층을 빼먹고도(네트워크 통신 유무는 지지/반박 모두에 중요한
-   신호) confidence만으로 종료가 승인되는 사례가 관찰되어 추가했다.
-2. _derive_fallback_verdict()에 reasoning 필드를 추가해, 자체 폴백 판정임을
-   명시하고 어떤 근거로 verdict_type을 계산했는지 남긴다. (LLM이 직접 낸
-   final_verdict의 reasoning은 prompts.py의 출력 스키마에서 요구한다.)
+seed에 src_ip가 있는데 fetch_network_log를 한 번도 호출하지 않은 채
+confidence_sufficient로 종료하려 하면 게이트가 거부한다. _derive_fallback_verdict()에
+reasoning 필드를 추가했다.
+
+*** 2026-09-17 추가 업데이트 (no_more_evidence의 게이트 우회 구멍 보완) ***
+위 src_ip 강제 조건은 termination_reason == "confidence_sufficient"일 때만
+적용되는데, LLM이 termination_reason을 "no_more_evidence"로 고르면 이 게이트를
+아예 안 거치고 종료가 가능하다는 허점이 실제 재현성 테스트에서 발견됐다
+(seed에 src_ip가 있는데 도구 1개, network 미확인 상태로 no_more_evidence 종료된
+사례 확인). 완전히 차단하면 "정말 더 볼 게 없다"는 정당한 조기 종료까지 막을
+위험이 있어, 일단은 state.notes에 경고성 기록만 남기도록 했다 (완전 차단 아님).
 """
 
 from __future__ import annotations
@@ -112,28 +104,12 @@ class InvestigationAgent:
                 # [2026-09-17 추가] 종료 관문: "confidence_sufficient"로 종료하려는
                 # 경우에만 적용한다. no_more_evidence(더 볼 로그가 없다는 판단)는
                 # 계층 수와 무관하게 합리적일 수 있어 차단하지 않는다.
-                # unknowns가 남아있는 것 자체는 차단 사유가 아니다 — confidence가
-                # 충분하면 remaining_unknowns로 보고서에 남긴 채 정상 종료하는 것이
-                # 정상 흐름이다.
                 if termination_reason == TerminationReason.CONFIDENCE_SUFFICIENT.value:
                     confidence_not_met = state.current_confidence < self.confidence_threshold
-                    # [2026-09-17 수정] investigated_layers(LLM이 자유 텍스트로 붙이는
-                    # evidence.layer 값) 대신, 실제 성공한 tool_calls의 서로 다른
-                    # tool_name 개수로 계층 다양성을 판단한다. 관찰된 문제: fetch_auth_log와
-                    # fetch_audit_log 결과를 LLM이 둘 다 layer="auth"로 라벨링하면
-                    # investigated_layers가 1개로 집계돼 게이트가 계속 거부하고,
-                    # LLM은 이미 관련 도구를 다 썼다고 판단해 새 도구를 못 찾아 max_cycles를
-                    # 소진하는 사례가 발견됨. tool_name 기준은 시스템이 직접 기록한
-                    # 사실이라 이런 라벨링 불일치에 영향받지 않는다.
                     successful_tool_names = {t.tool_name for t in state.tool_calls if t.success}
                     distinct_tools_used = len(successful_tool_names)
                     single_layer_only = distinct_tools_used <= 1
 
-                    # [2026-09-17 추가] seed에 src_ip가 있는 사건(외부 IP 관련 의심 사건)은
-                    # fetch_network_log로 해당 IP의 네트워크 활동(추가 통신 여부)을 반드시
-                    # 확인해야 한다. 실제 실행에서 이 계층을 빼먹고도 confidence만으로
-                    # 종료를 승인받는 사례가 관찰되어(외부 통신 유무는 반박/지지 증거 모두에
-                    # 중요한 신호이므로) 명시적으로 강제한다.
                     seed_has_src_ip = bool(state.seed.get("src_ip"))
                     network_tool_used = "fetch_network_log" in successful_tool_names
                     missing_network_check = seed_has_src_ip and not network_tool_used
@@ -155,11 +131,6 @@ class InvestigationAgent:
                         reason_text = ", ".join(reasons)
                         state.notes.append(f"종료 관문 발동 — 종료 거부: {reason_text}")
 
-                        # [2026-09-17 추가] 같은 사유로 연속 거부되면(LLM이 새 도구를
-                        # 찾지 못하거나 confidence 재평가도 안 하는 경우), 사이클을
-                        # 낭비하지 않고 강제 종료 턴으로 넘어가 지금까지의 증거로
-                        # 판정을 확정짓는다. (실제 사례: 이 안전장치 없이는 동일 사유로
-                        # 8회 연속 거부되며 max_cycles를 거의 다 소진한 바 있음.)
                         consecutive_rejections += 1
                         if consecutive_rejections >= MAX_CONSECUTIVE_REJECTIONS:
                             state.notes.append(
@@ -179,6 +150,20 @@ class InvestigationAgent:
 
                         gate_rejection_reason = reason_text  # 다음 턴 프롬프트에 실어 보냄
                         continue  # 종료 거부 — 다음 사이클로 넘어가 계속 조사
+
+                # [2026-09-17 추가] no_more_evidence 종료는 위 게이트를 안 거치므로,
+                # src_ip가 있는데 network 계층을 한 번도 안 쓴 채 종료되는 경우를
+                # 최소한 기록으로 남긴다 (완전 차단은 하지 않음 — 정당한 조기 종료를
+                # 막을 위험이 있어서). 실제 재현성 테스트에서 도구 1개(network 미확인)
+                # 상태로 no_more_evidence 종료되는 사례가 발견되어 추가했다.
+                if (
+                    termination_reason == TerminationReason.NO_MORE_EVIDENCE.value
+                    and state.seed.get("src_ip")
+                    and "fetch_network_log" not in {t.tool_name for t in state.tool_calls if t.success}
+                ):
+                    state.notes.append(
+                        "⚠ src_ip가 있는 사건이 network 계층 확인 없이 no_more_evidence로 종료됨 — 검토 권장"
+                    )
 
                 consecutive_rejections = 0  # 정상 종료 승인 — 카운터 리셋
                 final_verdict = decision.get("final_verdict") or self._derive_fallback_verdict(state)
@@ -230,9 +215,7 @@ class InvestigationAgent:
 
     # ------------------------------------------------------------------
     # [2026-09-17 추가] LLM이 강제 종료 턴(force_terminate=True)에서도
-    # final_verdict를 못 준 경우를 대비한 최후 안전망. report.py의
-    # build_investigation_result()가 기대하는 필드(verdict/confidence/severity/
-    # attack_type/affected_systems/summary/reasoning)를 그대로 맞췄다.
+    # final_verdict를 못 준 경우를 대비한 최후 안전망.
     # ------------------------------------------------------------------
     def _derive_fallback_verdict(self, state: AgentState) -> Dict[str, Any]:
         if state.current_confidence >= self.confidence_threshold:
@@ -267,9 +250,6 @@ class InvestigationAgent:
                 f"현재 신뢰도 {state.current_confidence:.2f} 기준 잠정 판단: {verdict_type}. "
                 f"최근 근거: {supporting}"
             ),
-            # [2026-09-17 추가] reasoning — LLM이 직접 낸 것이 아니라 시스템이 자동
-            # 계산한 폴백임을 명시하고, 어떤 근거(confidence vs threshold 비교)로만
-            # 판단했는지(개별 신호 확인은 없었음을) 남긴다.
             "reasoning": (
                 f"[자동 폴백 판정 — LLM이 final_verdict를 제공하지 않아 시스템이 자체 계산함] "
                 f"사용된 도구: {', '.join(used_tools) if used_tools else '없음'}. "
@@ -374,9 +354,6 @@ class InvestigationAgent:
                     error=error_msg,
                 )
             )
-            # [2026-09-17 추가] 실패도 성공 케이스와 동일한 채널(pending_observations)로
-            # LLM에 전달한다 — prompts.py의 raw_observations_since_last_turn에 그대로
-            # 실려서 다음 턴에 LLM이 실패 원인을 볼 수 있게 됨.
             state.pending_observations.append(
                 {
                     "tool_name": name,

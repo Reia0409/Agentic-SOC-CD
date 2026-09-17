@@ -2,56 +2,58 @@
   {
     "run": 1,
     "verdict": "FALSE_POSITIVE",
-    "confidence": 0.9,
+    "confidence": 0.85,
     "severity": "LOW",
-    "tool_calls_count": 2,
+    "tool_calls_count": 3,
     "termination_reason": "confidence_sufficient",
     "evidence_count": 2,
-    "summary": "ubuntu 계정으로 수행된 sudo 및 민감 파일 접근은 시스템 감사 로그 점검을 위한 정상적인 관리 행위로 확인되어 오탐으로 판정되었습니다.",
+    "summary": "외부 IP에서 계정 인증 시도 후 공개키 인증에 성공했으나, 감사 및 네트워크 로그에서 후속 악성 행위나 통신이 전혀 발견되지 않아 정상적인 원격 접속 또는 단순 스캔 시도로 판단됩니다.",
     "investigation_notes": [
-      "audit 단독 증거만으로는 sudo의 /etc/passwd 접근이 정상 관리 행위인지 침해인지 판단할 수 없으므로 auth 로그를 먼저 조회함",
-      "audit 로그 조회 후 명령어 내용에 따라 네트워크 로그나 프로세스 트리 조회를 연계할 예정"
+      "auth 로그에서 공개키 인증 성공이 확인되었으나, 이후 세션에서의 권한 상승 및 파일 접근 등 추가 행위를 확인하기 위해 audit 및 network 계층 조사가 필요함",
+      "network 로그 조회 후 추가 통신 여부를 확인하여 최종 판단을 내릴 예정입니다."
     ],
     "evidence_layers": [
       "auth",
-      "auth"
+      "network"
     ]
   },
   {
     "run": 2,
     "verdict": "FALSE_POSITIVE",
-    "confidence": 0.9,
+    "confidence": 0.88,
     "severity": "LOW",
-    "tool_calls_count": 2,
+    "tool_calls_count": 3,
     "termination_reason": "confidence_sufficient",
     "evidence_count": 3,
-    "summary": "ubuntu 계정이 원격 접속 후 sudo를 통해 수행한 작업은 시스템 감사 로그 확인을 위한 정상적인 관리 행위로 확인되어 오탐으로 판정합니다.",
+    "summary": "외부 IP에서의 초기 테스트 계정 로그인 시도는 무관한 스캔 행위로 판단되며, 이어 성공한 정상 계정 로그인은 공개키 인증을 통한 관리자의 정상 접속으로 확인되어 위협이 아닙니다.",
     "investigation_notes": [
-      "auth 로그 확인 후 audit 로그 및 프로세스 트리를 추가로 조회하여 후속 행위를 검증할 예정임",
-      "인증 로그 분석 결과 반복된 인증 실패 없이 공개키 기반으로 로그인되었으나, 정확한 행위 검증을 위해 audit 로그 조회가 필수적이다."
+      "공개키 인증 성공이 확인되었으므로, 해당 세션에서의 프로세스 실행 및 네트워크 통신 여부를 확인하여 정상 관리 행위인지 침해인지 최종 판단 필요",
+      "네트워크 로그 조회를 통해 해당 IP의 추가 통신 여부를 확인한 후 최종 판단 예정",
+      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.75)가 임계값(0.85) 미달"
     ],
     "evidence_layers": [
-      "auth",
-      "auth",
+      "process",
+      "network",
       "auth"
     ]
   },
   {
     "run": 3,
     "verdict": "FALSE_POSITIVE",
-    "confidence": 0.85,
+    "confidence": 0.88,
     "severity": "LOW",
-    "tool_calls_count": 2,
+    "tool_calls_count": 3,
     "termination_reason": "confidence_sufficient",
     "evidence_count": 2,
-    "summary": "ubuntu 계정의 sudo 및 민감 파일 접근 기록은 원격 관리자의 정상적인 감사 로그 확인 작업으로 확인되어 오탐으로 판정합니다.",
+    "summary": "외부 IP에서의 일시적인 계정 시도 후 등록된 공개키를 통한 정상 관리자 계정 로그인으로 확인되었으며, 로그인 후 추가적인 악성 행위나 외부 통신이 없어 정상적인 관리 목적의 접속으로 판단됩니다.",
     "investigation_notes": [
-      "auth 로그 확인 후 sudo 명령의 세부 내용을 파악하기 위해 fetch_audit_log 추가 조사가 필요할 수 있음",
-      "인증 로그 분석 결과 반복된 로그인 실패 없이 공개키 인증으로 정상 접속되었으나, 짧은 시간 동안 반복된 sudo 사용이 관측되었으므로 audit 로그를 통한 명령어 검증이 필수적이다."
+      "ubuntu 계정의 공개키 인증 성공 세션에서 수행된 프로세스 및 명령어를 확인한 후 최종 판단 예정",
+      "네트워크 로그 조회 후 추가 통신 여부가 확인되면 최종 판정을 내릴 예정임.",
+      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.65)가 임계값(0.85) 미달"
     ],
     "evidence_layers": [
-      "auth",
-      "auth"
+      "network",
+      "baseline"
     ]
   },
   {
@@ -59,53 +61,56 @@
     "verdict": "FALSE_POSITIVE",
     "confidence": 0.9,
     "severity": "LOW",
-    "tool_calls_count": 2,
+    "tool_calls_count": 3,
     "termination_reason": "confidence_sufficient",
-    "evidence_count": 2,
-    "summary": "ubuntu 계정의 sudo를 통한 민감 파일 접근은 관리자의 정상적인 감사 로그 확인 명령에 따른 부수적인 시스템 내부 동작으로 확인되어 오탐으로 판정합니다.",
+    "evidence_count": 1,
+    "summary": "관리자의 단순 계정명 오타 입력 후 등록된 공개키를 통한 정상적인 원격 접속으로 확인되었으며, 추가적인 위협 행위나 의심 통신은 관찰되지 않았습니다.",
     "investigation_notes": [
-      "audit 단독 증거만으로는 sudo 명령 수행이 정상 관리 행위인지 침해 행위인지 판단할 수 없으므로 auth 로그 조회를 선행함.",
-      "audit 로그 조회 후 명령어 내용에 따라 추가적인 프로세스 트리나 네트워크 통신 여부를 확인할 예정임."
+      "audit 로그를 통해 ubuntu 계정의 후속 행위를 확인한 뒤, network 로그로 추가 통신 여부를 조사할 예정입니다.",
+      "네트워크 로그 조회를 통해 해당 IP의 추가 통신 여부를 확인한 후 최종 판정을 내릴 예정입니다.",
+      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.25)가 임계값(0.85) 미달"
     ],
     "evidence_layers": [
-      "auth",
-      "auth"
+      "baseline"
     ]
   },
   {
     "run": 5,
     "verdict": "FALSE_POSITIVE",
-    "confidence": 0.88,
+    "confidence": 0.85,
     "severity": "LOW",
-    "tool_calls_count": 2,
+    "tool_calls_count": 3,
     "termination_reason": "confidence_sufficient",
-    "evidence_count": 2,
-    "summary": "ubuntu 계정이 원격에서 접속하여 수행한 작업은 시스템 감사 로그를 조회하기 위한 정상적인 관리 행위로 확인되었으며, 민감 파일 접근은 sudo 실행에 따른 정상적인 내부 동작입니다.",
+    "evidence_count": 3,
+    "summary": "외부 IP에서 존재하지 않는 계정 시도 후 정상 계정 'ubuntu'의 공개키 인증 성공 및 후속 명령어·네트워크 행위 부존재가 확인되어 정상적인 원격 관리 접근으로 판단됩니다.",
     "investigation_notes": [
-      "audit 단독 증거만으로는 정상적인 sudo 행위와 구분할 수 없으므로 auth 로그 조회를 통해 로그인 세션 정보를 먼저 확인합니다.",
-      "auth 로그에서 외부 IP를 통한 로그인과 sudo 실행을 확인하였으므로, 다음 단계로 audit 로그를 통해 실제 실행된 명령어와 대상 파일을 검증해야 합니다."
+      "fetch_audit_ログ 결과 확인 후 network 로그도 조회하여 외부 통신 여부 확인 필요",
+      "audit 로그에서 데이터가 확인되지 않았으므로 network 로그를 통해 외부 IP의 추가 통신 여부를 확인해야 합니다."
     ],
     "evidence_layers": [
       "auth",
-      "process"
+      "process",
+      "network"
     ]
   },
   {
     "run": 6,
-    "verdict": "FALSE_POSITIVE",
-    "confidence": 0.85,
-    "severity": "LOW",
-    "tool_calls_count": 2,
-    "termination_reason": "confidence_sufficient",
+    "verdict": "INCONCLUSIVE",
+    "confidence": 0.55,
+    "severity": "MEDIUM",
+    "tool_calls_count": 3,
+    "termination_reason": "no_more_evidence",
     "evidence_count": 2,
-    "summary": "ubuntu 계정이 정상적인 SSH 공개키 인증으로 접속한 후 시스템 감사 로그 점검 명령을 수행하는 과정에서 발생한 통상적인 관리 행위로 확인되었습니다.",
+    "summary": "외부 IP에서 계정 탐색 시도 후 공개키 인증으로 로그인이 성공했으나, 후속 행위 및 네트워크 통신 기록이 없어 침해 여부를 확정할 수 없습니다.",
     "investigation_notes": [
-      "audit 로그 단독 증거만으로는 정상 관리 행위와 침해 사고를 구분할 수 없으므로 auth 로그를 먼저 확인합니다.",
-      "auth 로그에서 공개키 인증 기반의 로그인과 연속적인 sudo 실행이 확인되었으므로, audit 로그를 조회하여 구체적인 명령어 및 행위를 검증해야 함"
+      "auth 로그에서 공개키 인증 성공이 확인되었으나, 후속 audit 로그를 확인하여 실제 악성 행위 여부를 검증해야 함",
+      "네트워크 계층 조사를 통해 해당 IP의 추가 통신 여부를 확인한 뒤 최종 판단 예정",
+      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.55)가 임계값(0.85) 미달",
+      "더 이상 조회 가능한 관련 로그(auth, audit, network)가 남아있지 않으므로 추가 조사가 불가능합니다."
     ],
     "evidence_layers": [
       "auth",
-      "process"
+      "audit"
     ]
   },
   {
@@ -113,35 +118,41 @@
     "verdict": "FALSE_POSITIVE",
     "confidence": 0.9,
     "severity": "LOW",
-    "tool_calls_count": 2,
+    "tool_calls_count": 3,
     "termination_reason": "confidence_sufficient",
-    "evidence_count": 2,
-    "summary": "외부 IP에서 공개키 인증으로 접속한 정상 사용자가 시스템 감사 로그를 확인하기 위해 수행한 관리 목적의 sudo 명령으로 확인되어 오탐으로 판정합니다.",
+    "evidence_count": 3,
+    "summary": "관리자의 단순 계정명 오타 후 등록된 공개키를 이용한 정상적인 원격 접속으로 확인되어 오탐으로 판정합니다.",
     "investigation_notes": [
-      "auth 로그 확인 후 sudo 명령의 구체적 내용을 확인하기 위해 fetch_audit_log를 추가 호출할 예정입니다.",
-      "auth 로그에서 공개키 인증을 통한 SSH 접속과 연이어 발생한 sudo 실행을 확인했으나, 구체적인 명령어 내용은 알 수 없으므로 audit 로그 조회가 필수적입니다."
+      "auth 로그 확인 후 후속 행위 조사를 위해 fetch_audit_log 및 fetch_network_log를 연계하여 호출할 예정",
+      "audit 로그 조회를 통해 ubuntu 계정의 후속 행위를 확인한 뒤 최종 판정을 내릴 예정임.",
+      "네트워크 로그 조회를 통해 해당 IP의 추가 통신 여부를 확인한 후 최종 판단을 내릴 예정임",
+      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.75)가 임계값(0.85) 미달"
     ],
     "evidence_layers": [
-      "auth",
-      "auth"
+      "process",
+      "network",
+      "baseline"
     ]
   },
   {
     "run": 8,
     "verdict": "FALSE_POSITIVE",
-    "confidence": 0.9,
+    "confidence": 0.88,
     "severity": "LOW",
-    "tool_calls_count": 2,
+    "tool_calls_count": 3,
     "termination_reason": "confidence_sufficient",
-    "evidence_count": 2,
-    "summary": "ubuntu 계정이 정상적인 공개키 인증으로 접속하여 수행한 시스템 로그 점검 행위로 확인되어 오탐으로 판정합니다.",
+    "evidence_count": 4,
+    "summary": "존재하지 않는 계정 입력 시도 직후 발생한 로그인 성공은 사전 등록된 공개키를 통한 정상 관리자의 접근으로 확인되어 오탐으로 판정되었습니다.",
     "investigation_notes": [
-      "auth 로그 확인 후 audit 로그 및 프로세스 트리를 추가 조회하여 세션 내 후속 명령어를 검증할 예정",
-      "fetch_audit_로그를 통해 sudo 세션 내부에서 실행된 명령어의 상세 내용을 확인해야 함"
+      "audit 로그 조회 후 network 로그도 함께 조회하여 외부 통신 여부를 확인할 예정입니다.",
+      "네트워크 로그 조회를 통해 해당 IP의 추가 통신 여부를 확인한 후 최종 결론을 도출할 예정입니다.",
+      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.75)가 임계값(0.85) 미달"
     ],
     "evidence_layers": [
       "auth",
-      "process"
+      "process",
+      "network",
+      "auth"
     ]
   }
 ]

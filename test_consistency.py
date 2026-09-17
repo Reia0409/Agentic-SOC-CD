@@ -27,16 +27,16 @@ from agent.tools import build_default_registry
 load_dotenv()
 
 SEED = {
-    "incident_id": "CONSISTENCY-TEST-01",
+    "incident_id": "CONSISTENCY-TEST-02",
     "detection_source": "llm_triage",
-    "trigger_time": "2026-09-14T15:20:49.553Z",
-    "trigger_description": "ubuntu 계정의 sudo를 통한 민감 파일(/etc/passwd) 접근 및 감사 로그 확인 행위",
+    "trigger_time": "2026-09-14T07:36:17+00:00",
+    "trigger_description": "동일 외부 IP에서 존재하지 않는 계정(test) 로그인 실패 직후, 같은 IP로 정상 계정(ubuntu) 공개키 인증 성공 발생",
     "confidence_initial": 0.6,
     "severity_hint": "MEDIUM",
     "priority": 1,
     "host": "web-01",
-    "src_ip": None,
-    "reasoning": "관리자 권한(sudo)으로 민감한 시스템 파일인 /etc/passwd에 접근한 감사 로그가 포착되어 내부 사용자 권한 남용 또는 이상 행위 여부 확인이 필요합니다.",
+    "src_ip": "203.230.195.21",
+    "reasoning": "존재하지 않는 계정으로 먼저 로그인을 시도한 직후, 같은 IP가 정상 계정으로 인증에 성공한 패턴이 확인되어 계정 탐색 후 침해 성공 가능성이 의심됩니다.",
 }
 
 RETRY_DELAY_RE = re.compile(r"retryDelay['\"]?:\s*['\"]?(\d+(?:\.\d+)?)s")
