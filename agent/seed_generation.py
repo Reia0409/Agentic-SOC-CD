@@ -16,7 +16,8 @@ from typing import Any, Dict, List
 
 from .seed_prompts import SEED_SYSTEM_PROMPT, build_seed_user_prompt
 
-
+# [11] agent/pipeline.py에서 실행됨
+#     구조화된 로그를 LLM한테 보여줘서 seed 후보 리스트 뽑음
 class SeedGenerator:
     def __init__(self, llm_client: Any) -> None:
         self.llm_client = llm_client
@@ -28,10 +29,13 @@ class SeedGenerator:
         if not raw_logs:
             return []
 
+        # [12] agent/seed_prompts.py 의 build_seed_user_prompt() 실행
         user_prompt = build_seed_user_prompt(raw_logs, host)
         decision = self.llm_client.complete_json(SEED_SYSTEM_PROMPT, user_prompt)
-
+        
         candidates = decision.get("candidates") or []
         # priority가 없거나 이상한 값이면 가장 낮은 우선순위(맨 뒤)로 보낸다.
         candidates.sort(key=lambda c: c.get("priority", 999))
+
+        # [14] 우선순위로 걸러진 조사 후보들을 반환함
         return candidates

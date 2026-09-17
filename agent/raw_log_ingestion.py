@@ -110,7 +110,7 @@ def _events_from_text(source_key: str, text: str) -> List[Dict[str, Any]]:
     # 실제로는 호출될 일이 없다) — 안전하게 빈 리스트를 반환한다.
     return []
 
-
+# [9] 각 계층별로 raw log 최신 30줄씩 읽음
 def _read_layer_text(
     source_key: str,
     s3_source_type: str,
@@ -143,7 +143,8 @@ def _read_layer_text(
         chunks.append(text)
     return "\n".join(chunks)
 
-
+# [7] pipeline.py로 fetch_recent_raw_logs 실행
+#     로그 모아서 구조화 진행
 def fetch_recent_raw_logs(
     host: str,
     minutes: int = 10,
@@ -173,6 +174,7 @@ def fetch_recent_raw_logs(
         is_local_mode = bool(os.environ.get(LOCAL_PATH_ENV[source_key]))
 
         s3_source_type = SOURCE_TYPES.get(source_key, source_key)
+        # [8] agent/tools/parsers의 계층별로 파서 사용해 raw log 정규화
         text = _read_layer_text(source_key, s3_source_type, host, bucket, start, end)
         for record in _events_from_text(source_key, text):
             ts = record.pop("_ts", None)

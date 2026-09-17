@@ -56,7 +56,9 @@ SEED_SYSTEM_PROMPT = """\
 }
 """
 
-
+# [13] agent/seed_generation.py에서 build_seed_user_prompt 실행
+#      4계층 X 30줄 로그를 통째로 Gemini에게 넘겨서 "여기서 조사할 가치가 있는 후보가 있나?" 물어봄
+#      Gemini가 로그를 읽고 직접 이해하고, 조사 후보를 반환함
 def build_seed_user_prompt(raw_logs: List[Dict[str, Any]], host: str) -> str:
     payload = {
         "host": host,

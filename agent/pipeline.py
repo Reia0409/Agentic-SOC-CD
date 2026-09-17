@@ -13,7 +13,7 @@ from .loop import InvestigationAgent
 from .raw_log_ingestion import fetch_recent_raw_logs
 from .seed_generation import SeedGenerator
 
-
+# [5] main.py의 실행으로 run_investigation_pipeline 실행
 def run_investigation_pipeline(
     host: str,
     llm_client: Any,
@@ -34,15 +34,20 @@ def run_investigation_pipeline(
     seed_generator를 따로 넘기면(예: 더 가벼운 모델의 GeminiClient) triage 단계와
     조사 단계에 서로 다른 모델을 쓸 수 있다. 안 넘기면 llm_client를 그대로 재사용한다.
     """
+    # [6] agent/raw_log_ingestion.py의 fetch_recent_raw_logs 실행
+    #     최근 `minutes`분 raw log를 host 기준으로 긁어옴
     raw_logs = fetch_recent_raw_logs(host=host, minutes=minutes)
 
+    # [10] agent/seed_generation.py의 SeedGenerator 실행
     generator = seed_generator or SeedGenerator(llm_client)
+    # [15] Gemini로 걸러진 후보들이 seeds에 들어있음
     seeds = generator.generate(raw_logs, host=host)
 
     if max_seeds is not None:
         seeds = seeds[:max_seeds]
 
     results: List[Dict[str, Any]] = []
+    # [16] 각 후보를 조사 에이전트 루프(agent/loop.py)에 넣어 심층 판단 진행
     for seed in seeds:
         agent = InvestigationAgent(
             llm_client,
@@ -51,5 +56,5 @@ def run_investigation_pipeline(
             confidence_threshold=confidence_threshold,
         )
         results.append(agent.run(seed))
-
+    # [43] loop.py의 반환값을 main.py에 반환
     return results

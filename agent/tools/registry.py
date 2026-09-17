@@ -87,12 +87,14 @@ class ToolRegistry:
         unknown = [a for a in args if a not in allowed]
         if unknown:
             raise ToolValidationError(f"{name} 호출에 알 수 없는 인자가 있습니다: {unknown}")
-
+    # [31] agent/tools/real/의 tool 실행
+    # loop.py에서 받은 name 에 해당하는 ToolSpec 찾음 (예 : name = "fetch_auth_log")
     def call(self, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         spec = self.get(name)
         self.validate_args(name, args)
         if spec.handler is None:
             raise NotImplementedError(f"{name}의 handler가 아직 연결되지 않았습니다.")
+        # [36] tool의 조사 결과 반환
         return spec.handler(args)
 
 

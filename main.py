@@ -41,9 +41,15 @@ def main() -> None:
 
     # resolve_ip_geo는 실제 구현은 있지만 지금 우선순위가 아니라서 제외해둔다.
     # get_process_tree는 2026-09-14에 실제 구현 완성돼서 제외 목록에서 뺐다.
+    
+    # [2] agent/tools/registry.py가 agent/tools/real/ 폴더를 훑어서
+    #     파일명 == 함수명인 것들을 자동으로 찾아 연결함
     tool_registry = build_default_registry(exclude=["resolve_ip_geo"])
+    # [3] GeminiClient 생성
     llm_client = build_llm_client()
 
+    # [4] 조사 pipline 실행 agent/pipelin.py 의 run_investigation_pipeline() 실행
+    # [44] agent/pipeline.py로부터 조사 결과를 result에 반환
     results = run_investigation_pipeline(
         host=host,
         llm_client=llm_client,
@@ -57,6 +63,7 @@ def main() -> None:
         print(f"최근 {minutes}분 동안 {host}에서 조사할 만한 seed 후보가 없었습니다.")
         return
 
+    # [45] 조사 결과 프롬포트에 출력
     for i, result in enumerate(results, start=1):
         print(f"\n{'='*10} 조사 {i}/{len(results)} — {result['incident_id']} {'='*10}")
         print(format_text_report(result))
@@ -65,5 +72,6 @@ def main() -> None:
     print(json.dumps(results, ensure_ascii=False, indent=2))
 
 
+# [1] main() 함수 실행
 if __name__ == "__main__":
     main()

@@ -47,12 +47,14 @@ class GeminiClient:
         self.max_output_tokens = max_output_tokens
         self.temperature = temperature
 
+    # [21] agent/prompts.py 실행하여 프롬포트 호출
     def reason(self, state: Any, tool_registry: Any) -> Dict[str, Any]:
         """조사 루프(agent/loop.py) 전용: prompts.py의 investigation 프롬프트로 호출."""
         system_prompt = build_system_prompt(tool_registry)
         user_prompt = build_user_prompt(state)
         return self.complete_json(system_prompt, user_prompt)
 
+    # [22] 만들어진 프롬포트로 진짜 Gemini 호출
     def complete_json(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
         """범용 호출: 어떤 system/user 프롬프트든 받아서 JSON으로 파싱해 돌려준다.
         seed_generation.py(경량 LLM triage)처럼 조사 루프가 아닌 다른 용도에서도 재사용한다.

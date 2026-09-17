@@ -11,7 +11,7 @@ Stage 구분은 이 JSON의 필드 구분으로 유지된다.) 사이클 수를 
 쪼개는 방식도 가능하지만, 토큰/지연 비용 대비 이득이 크지 않아 이 구조를 택했다.
 필요 시 build_system_prompt만 교체하면 Stage별 분리 호출로 바꿀 수 있다.
 """
-
+## [0917 멘토링] 코드 분리 필요 yaml 파일 등
 from __future__ import annotations
 
 import json
