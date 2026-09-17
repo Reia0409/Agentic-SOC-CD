@@ -7,6 +7,21 @@ claude_client.py의 ClaudeClient(Anthropic)와 동일하게 .reason(state, tool_
 사전 준비:
     pip install google-genai
     export GEMINI_API_KEY=...   (Google AI Studio에서 발급한 무료 티어 키도 가능)
+
+*** 2026-09-17 업데이트: confidence_threshold/force_terminate 전달 + temperature 0.0 ***
+reason()이 loop.py로부터 confidence_threshold(LLM이 종료 조건을 스스로 검증하도록)와
+force_terminate(max_call 도달 시 도구 호출 없이 판정만 요청하는 마무리 턴 여부)를
+받아 prompts.build_user_prompt()에 그대로 전달하도록 확장했다.
+
+temperature는 0.2 -> 0.0으로 낮췄다 — 같은 증거를 두고 실행마다 판정이 갈리는
+재현성 이슈가 발견되어, 조사 판정처럼 일관성이 중요한 영역에서는 창의성보다
+결정성을 우선하기로 했다.
+
+*** 2026-09-17 추가 업데이트: gate_rejection_reason 전달 ***
+loop.py의 종료 관문이 거부한 사유를 다음 턴 프롬프트에 노출하기 위해
+gate_rejection_reason 파라미터를 추가로 받아 build_user_prompt()에 전달한다.
+(종료 관문이 같은 사유로 계속 거부되는데 LLM이 그 사실을 몰라 동일 요청을
+반복하며 사이클을 낭비하던 버그의 수정 일부.)
 """
 
 from __future__ import annotations
@@ -29,7 +44,7 @@ class GeminiClient:
         api_key: Optional[str] = None,
         model: str = "gemini-3.5-flash-lite",  # 무료 티어 실습에서 지정한 모델
         max_output_tokens: int = 2000,
-        temperature: float = 0.2,
+        temperature: float = 0.0,
     ) -> None:
         # google-genai 패키지는 실제 호출 시에만 필요하므로 지연 import한다.
         from google import genai
@@ -48,10 +63,29 @@ class GeminiClient:
         self.temperature = temperature
 
     # [21] agent/prompts.py 실행하여 프롬포트 호출
-    def reason(self, state: Any, tool_registry: Any) -> Dict[str, Any]:
-        """조사 루프(agent/loop.py) 전용: prompts.py의 investigation 프롬프트로 호출."""
+    def reason(
+        self,
+        state: Any,
+        tool_registry: Any,
+        confidence_threshold: Optional[float] = None,
+        force_terminate: bool = False,
+        gate_rejection_reason: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """조사 루프(agent/loop.py) 전용: prompts.py의 investigation 프롬프트로 호출.
+
+        confidence_threshold: 시스템의 종료 임계값을 프롬프트에 노출하기 위해 전달.
+        force_terminate: max_call 도달 시 도구 호출 없이 판정만 받는 마무리 턴에서
+        True로 호출됨.
+        gate_rejection_reason: [2026-09-17 추가] 직전 턴에 종료 관문이 거부한 사유가
+        있으면 전달 — LLM이 거부당한 사실을 인지하고 새 행동을 취하게 함.
+        """
         system_prompt = build_system_prompt(tool_registry)
-        user_prompt = build_user_prompt(state)
+        user_prompt = build_user_prompt(
+            state,
+            confidence_threshold=confidence_threshold,
+            force_terminate=force_terminate,
+            gate_rejection_reason=gate_rejection_reason,
+        )
         return self.complete_json(system_prompt, user_prompt)
 
     # [22] 만들어진 프롬포트로 진짜 Gemini 호출
@@ -89,15 +123,12 @@ class GeminiClient:
         try:
             return json.loads(cleaned)
         except json.JSONDecodeError as exc:
-            # Gemini가 response_mime_type="application/json"을 줘도 가끔 배열/객체
-            # 마지막 항목 뒤에 trailing comma(",]"/",}")를 남길 때가 있다. 표준 JSON
-            # 파서는 이걸 문법 오류로 거부하니, 딱 그 패턴만 제거하고 한 번 더 시도한다.
             fixed = re.sub(r",\s*([\]}])", r"\1", cleaned)
             if fixed != cleaned:
                 try:
                     return json.loads(fixed)
                 except json.JSONDecodeError:
-                    pass  # 고쳐도 안 되면 원래 예외를 그대로 보고한다
+                    pass
             raise GeminiDecisionError(
                 f"Gemini 응답을 JSON으로 파싱하지 못했습니다: {exc}\n원본 응답:\n{text}"
             ) from exc

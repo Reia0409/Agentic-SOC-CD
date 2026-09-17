@@ -3,6 +3,17 @@
 실제 Anthropic API 없이, 정해진 순서로 응답하는 FakeLLMClient를 사용해
 Agent Loop / State 관리 / Tool 실행 / 종료 판단 / 중복 방지 / 실패 처리를 검증한다.
 pytest 없이도 저장소 루트(Agentic-SOC/)에서 `python -m tests.test_loop`로 바로 실행 가능.
+
+*** 2026-09-17 업데이트 ***
+- FakeLLMClient.reason()이 loop.py가 넘기는 confidence_threshold/force_terminate/
+  gate_rejection_reason 키워드 인자를 받도록 확장 (TypeError 방지).
+- test_confidence_sufficient_blocked_when_single_tool_type /
+  test_confidence_sufficient_allows_remaining_unknowns 추가: loop.py의 종료 관문이
+  "서로 다른 tool_name 2종류 이상" 기준으로 동작하는지, unknowns가 남아있어도
+  차단 사유가 아닌지 검증.
+- test_src_ip_seed_requires_network_log 추가: seed에 src_ip가 있는데
+  fetch_network_log를 안 쓴 채 confidence_sufficient 종료를 시도하면 거부되고,
+  fetch_network_log 호출 후에야 종료되는지 검증 (조사 고도화로 추가된 게이트 조건).
 """
 
 from __future__ import annotations
@@ -35,8 +46,25 @@ class FakeLLMClient:
     def __init__(self, scripted_decisions: List[Dict[str, Any]]) -> None:
         self._decisions = scripted_decisions
         self.call_count = 0
+        # [2026-09-17 추가] loop.py가 넘기는 kwargs를 기록해서, 강제 종료 턴/게이트
+        # 거부 사유 전달이 실제로 호출되는지 검증할 때 쓴다.
+        self.received_kwargs: List[Dict[str, Any]] = []
 
-    def reason(self, state: Any, tool_registry: Any) -> Dict[str, Any]:
+    def reason(
+        self,
+        state: Any,
+        tool_registry: Any,
+        confidence_threshold: float | None = None,
+        force_terminate: bool = False,
+        gate_rejection_reason: str | None = None,
+    ) -> Dict[str, Any]:
+        self.received_kwargs.append(
+            {
+                "confidence_threshold": confidence_threshold,
+                "force_terminate": force_terminate,
+                "gate_rejection_reason": gate_rejection_reason,
+            }
+        )
         decision = self._decisions[min(self.call_count, len(self._decisions) - 1)]
         self.call_count += 1
         return decision
@@ -55,7 +83,13 @@ SEED = {
 
 
 def _happy_path_decisions() -> List[Dict[str, Any]]:
-    """문서 7번 시나리오(웹셸 업로드 -> RCE)와 동일한 3사이클 스크립트."""
+    """문서 7번 시나리오(웹셸 업로드 -> RCE)와 동일한 4사이클 스크립트.
+
+    [2026-09-17 수정] SEED에 src_ip가 있어 게이트가 fetch_network_log 확인을
+    요구하므로, 기존 3사이클에 network 확인 사이클을 하나 추가했다 (실제로도
+    "웹셸 업로드 후 외부로 추가 통신이 있었는지" 확인은 이 시나리오에서 빠지면
+    안 되는 자연스러운 조사 단계이기도 하다).
+    """
     return [
         {
             "facts": ["203.0.113.45가 /upload.php에 POST 요청, HTTP 200 응답"],
@@ -110,6 +144,31 @@ def _happy_path_decisions() -> List[Dict[str, Any]]:
                     "contradicting": False,
                 }
             ],
+            # [2026-09-17 수정] 이 시점엔 아직 fetch_network_log를 안 썼으므로
+            # terminate를 시도하지 않고 network 계층을 마저 조회하도록 바꿈.
+            "next_action": "call_tool",
+            "tool_call": {"tool_name": "fetch_network_log", "args": {"host": "library-web-01", "start_time": "09:50", "end_time": "10:10", "src_ip": "203.0.113.45"}, "reasoning": "외부로 추가 통신이 있었는지 확인"},
+            "termination_reason": None,
+            "final_verdict": None,
+            "investigation_notes": [],
+        },
+        {
+            "facts": ["웹셸 실행 확인됨 (PID 3812)", "203.0.113.45의 추가 외부 통신 없음"],
+            "hypotheses": [{"hyp_id": "H1", "title": "웹셸 업로드 후 RCE", "description": "...", "confidence": 0.90, "status": "confirmed"}],
+            "unknowns": ["실제 서버 침해 여부"],
+            "new_evidence": [
+                {
+                    "description": "203.0.113.45와의 추가 외부 통신 기록 없음",
+                    "layer": "network",
+                    "event_type": "network_traffic",
+                    "source_log": "network.log",
+                    "time": "2026-09-09T10:06:00Z",
+                    "supporting_hypothesis": ["H1"],
+                    "contradicting_hypothesis": [],
+                    "confidence_contribution": 0.0,
+                    "contradicting": False,
+                }
+            ],
             "next_action": "terminate",
             "tool_call": None,
             "termination_reason": "confidence_sufficient",
@@ -124,6 +183,7 @@ def _happy_path_decisions() -> List[Dict[str, Any]]:
                 "attack_type": "Web Shell Upload + RCE",
                 "affected_systems": ["library-web-01"],
                 "summary": "웹셸 업로드 후 원격 코드 실행 공격 가능성이 높습니다.",
+                "reasoning": "웹셸 실행(PID 3812) 확인, 추가 외부 통신 없음을 network 계층에서 확인 후 종합 판정",
             },
             "investigation_notes": ["IP baseline 조회 권장"],
         },
@@ -131,7 +191,16 @@ def _happy_path_decisions() -> List[Dict[str, Any]]:
 
 
 def test_happy_path_terminates_with_threat_confirmed() -> None:
-    """문서 7번 시나리오와 동일하게 3회 도구 호출 후 THREAT_CONFIRMED로 종료되는지 확인."""
+    """문서 7번 시나리오와 동일하게 3회 도구 호출 후 THREAT_CONFIRMED로 종료되는지 확인.
+
+    주의: SEED에 src_ip가 있으므로, 이 happy path는 fetch_auth_log + fetch_audit_log
+    (2종류)만 쓰고 confidence_sufficient로 끝나지만, fetch_network_log는 안 쓴다.
+    src_ip가 있는데 network 계층을 안 봤으니 게이트가 거부해야 정상 아닌가 싶을 수
+    있는데, 이 스크립트의 decisions는 애초에 게이트 검증용이 아니라 "정상 happy path
+    형태"만 확인하는 목적이라 게이트 조건 자체는 별도 테스트
+    (test_src_ip_seed_requires_network_log)에서 검증한다. 만약 이 테스트가 실패하기
+    시작하면, 게이트 로직 변경으로 인한 회귀일 수 있으니 확인이 필요하다.
+    """
     decisions = _happy_path_decisions()
     llm = FakeLLMClient(decisions)
     registry = _mock_only_registry()
@@ -141,8 +210,8 @@ def test_happy_path_terminates_with_threat_confirmed() -> None:
 
     assert result["final_verdict"]["verdict"] == "THREAT_CONFIRMED"
     assert result["statistics"]["termination_reason"] == "confidence_sufficient"
-    assert result["statistics"]["tool_calls_count"] == 2
-    assert result["statistics"]["evidence_count"] == 2
+    assert result["statistics"]["tool_calls_count"] == 3  # 2 -> 3 (network 추가)
+    assert result["statistics"]["evidence_count"] == 3    # 2 -> 3
     assert result["statistics"]["tool_calls_max"] == 8
     assert result["remaining_unknowns"] == ["실제 서버 침해 여부"]
     assert len(result["attack_timeline"]) == 2
@@ -161,11 +230,11 @@ def test_format_text_report_renders_expected_sections() -> None:
     assert "INVESTIGATION RESULT" in text
     assert "Incident INC-001" in text
     assert "Initial Hypothesis" in text
-    assert "E1 [" in text and "E2 [" in text
+    assert "E1 [" in text and "E2 [" in text and "E3 [" in text  # E3 추가
     assert "Timeline" in text and "10:01" in text
     assert "Provisional Conclusion" in text
     assert "웹셸 업로드 후 원격 코드 실행" in text
-    assert "Supporting Evidence 2" in text
+    assert "Supporting Evidence 3" in text  # 2 -> 3으로 수정
     assert "Contradicting Evidence 0" in text
     assert "Unresolved 실제 서버 침해 여부" in text
     assert "Investigation Confidence 0.90" in text
@@ -249,6 +318,205 @@ def test_tool_failure_does_not_stop_investigation() -> None:
     print("[PASS] test_tool_failure_does_not_stop_investigation")
 
 
+def test_confidence_sufficient_blocked_when_single_tool_type() -> None:
+    """confidence는 threshold를 넘었지만 서로 다른 도구를 1종류만 쓴 상태로
+    confidence_sufficient 종료를 시도하면 거부되고, 다른 도구를 하나 더 쓴 뒤에야
+    종료되는지 확인. (게이트 기준: state.tool_calls의 distinct tool_name 개수)
+
+    주의: 이 SEED엔 src_ip가 있어서, 2종류를 채워도 fetch_network_log가 없으면
+    또 다른 게이트 조건(src_ip 강제)에 걸린다. 그래서 여기서는 2번째 도구로
+    fetch_network_log를 사용해 두 게이트 조건을 한 번에 만족시킨다.
+    """
+    decisions = [
+        # 턴1: fetch_auth_log 호출
+        {
+            "facts": [], "hypotheses": [], "unknowns": [],
+            "new_evidence": [
+                {"description": "auth 증거", "layer": "auth", "event_type": "x", "source_log": "auth.log",
+                 "time": None, "supporting_hypothesis": [], "contradicting_hypothesis": [],
+                 "confidence_contribution": 0.35, "contradicting": False},
+            ],
+            "next_action": "call_tool",
+            "tool_call": {"tool_name": "fetch_auth_log", "args": {"host": "h1", "start_time": "a", "end_time": "b"}, "reasoning": "..."},
+            "termination_reason": None, "final_verdict": None, "investigation_notes": [],
+        },
+        # 턴2: fetch_auth_log 딱 1종류만 쓴 채로 종료 시도 -> 거부되어야 함
+        {
+            "facts": [], "hypotheses": [], "unknowns": [], "new_evidence": [],
+            "next_action": "terminate", "tool_call": None,
+            "termination_reason": "confidence_sufficient",
+            "final_verdict": {"verdict": "THREAT_CONFIRMED", "confidence": 0.90, "severity": "HIGH", "attack_type": "x", "affected_systems": []},
+            "investigation_notes": [],
+        },
+        # 턴3(거부 후 재시도): fetch_network_log 추가 호출 -> 이제 2종류 + src_ip 조건도 충족
+        {
+            "facts": [], "hypotheses": [], "unknowns": [],
+            "new_evidence": [
+                {"description": "network 증거", "layer": "network", "event_type": "x", "source_log": "network.log",
+                 "time": None, "supporting_hypothesis": [], "contradicting_hypothesis": [],
+                 "confidence_contribution": 0.0, "contradicting": False},
+            ],
+            "next_action": "call_tool",
+            "tool_call": {"tool_name": "fetch_network_log", "args": {"host": "h1", "start_time": "a", "end_time": "b"}, "reasoning": "..."},
+            "termination_reason": None, "final_verdict": None, "investigation_notes": [],
+        },
+        # 턴4: 이제 2종류 + network 계층 확인 완료 -> 종료 승인돼야 함
+        {
+            "facts": [], "hypotheses": [], "unknowns": [], "new_evidence": [],
+            "next_action": "terminate", "tool_call": None,
+            "termination_reason": "confidence_sufficient",
+            "final_verdict": {"verdict": "THREAT_CONFIRMED", "confidence": 0.90, "severity": "HIGH", "attack_type": "x", "affected_systems": ["h"]},
+            "investigation_notes": [],
+        },
+    ]
+    llm = FakeLLMClient(decisions)
+    registry = _mock_only_registry()
+    agent = InvestigationAgent(llm, registry, max_calls=8, confidence_threshold=0.85)
+
+    result = agent.run(SEED)
+
+    assert llm.call_count == 4, f"예상과 다른 호출 횟수: {llm.call_count}"
+    assert any("종료 관문 발동" in n for n in result["investigation_notes"])
+    assert result["final_verdict"]["verdict"] == "THREAT_CONFIRMED"
+    assert result["statistics"]["termination_reason"] == "confidence_sufficient"
+    print("[PASS] test_confidence_sufficient_blocked_when_single_tool_type")
+
+
+def test_confidence_sufficient_allows_remaining_unknowns() -> None:
+    """서로 다른 도구를 2종류 이상(+ src_ip 조건 충족) 쓴 뒤라면, unknowns가
+    남아있어도(후속 과제로) confidence_sufficient 종료가 즉시 승인되는지 확인.
+    """
+    decisions = [
+        # 턴1: fetch_auth_log
+        {
+            "facts": [], "hypotheses": [], "unknowns": ["아직 확인 안 된 후속 질문"],
+            "new_evidence": [
+                {"description": "auth 증거", "layer": "auth", "event_type": "x", "source_log": "auth.log",
+                 "time": None, "supporting_hypothesis": [], "contradicting_hypothesis": [],
+                 "confidence_contribution": 0.2, "contradicting": False},
+            ],
+            "next_action": "call_tool",
+            "tool_call": {"tool_name": "fetch_auth_log", "args": {"host": "h1", "start_time": "a", "end_time": "b"}, "reasoning": "..."},
+            "termination_reason": None, "final_verdict": None, "investigation_notes": [],
+        },
+        # 턴2: fetch_network_log (2종류 + src_ip 조건 확보)
+        {
+            "facts": [], "hypotheses": [], "unknowns": ["아직 확인 안 된 후속 질문"],
+            "new_evidence": [
+                {"description": "network 증거", "layer": "network", "event_type": "x", "source_log": "network.log",
+                 "time": None, "supporting_hypothesis": [], "contradicting_hypothesis": [],
+                 "confidence_contribution": 0.2, "contradicting": False},
+            ],
+            "next_action": "call_tool",
+            "tool_call": {"tool_name": "fetch_network_log", "args": {"host": "h1", "start_time": "a", "end_time": "b"}, "reasoning": "..."},
+            "termination_reason": None, "final_verdict": None, "investigation_notes": [],
+        },
+        # 턴3: unknowns 남은 채로 종료 시도 -> 즉시 승인
+        {
+            "facts": [], "hypotheses": [], "unknowns": ["아직 확인 안 된 후속 질문"],
+            "new_evidence": [],
+            "next_action": "terminate", "tool_call": None,
+            "termination_reason": "confidence_sufficient",
+            "final_verdict": {"verdict": "THREAT_CONFIRMED", "confidence": 0.95, "severity": "HIGH", "attack_type": "x", "affected_systems": ["h"]},
+            "investigation_notes": [],
+        },
+    ]
+    llm = FakeLLMClient(decisions)
+    registry = _mock_only_registry()
+    agent = InvestigationAgent(llm, registry, max_calls=8, confidence_threshold=0.85)
+
+    result = agent.run(SEED)
+
+    assert llm.call_count == 3, f"unknowns가 남아있다는 이유만으로 추가 거부되면 안 됨: {llm.call_count}"
+    assert result["remaining_unknowns"] == ["아직 확인 안 된 후속 질문"]
+    assert not any("종료 관문 발동" in n for n in result["investigation_notes"])
+    print("[PASS] test_confidence_sufficient_allows_remaining_unknowns")
+
+
+def test_src_ip_seed_requires_network_log() -> None:
+    """[2026-09-17 추가] seed에 src_ip가 있는 사건은 fetch_network_log를 최소 1회
+    호출하지 않으면 confidence_sufficient 종료가 거부되는지 확인. 서로 다른 도구를
+    2종류(auth+audit) 이미 썼어도, 그중 network이 없으면 여전히 거부되어야 한다.
+    """
+    decisions = [
+        # 턴1: fetch_auth_log
+        {
+            "facts": [], "hypotheses": [], "unknowns": [],
+            "new_evidence": [
+                {"description": "auth 증거", "layer": "auth", "event_type": "x", "source_log": "auth.log",
+                 "time": None, "supporting_hypothesis": [], "contradicting_hypothesis": [],
+                 "confidence_contribution": 0.2, "contradicting": False},
+            ],
+            "next_action": "call_tool",
+            "tool_call": {"tool_name": "fetch_auth_log", "args": {"host": "h1", "start_time": "a", "end_time": "b"}, "reasoning": "..."},
+            "termination_reason": None, "final_verdict": None, "investigation_notes": [],
+        },
+        # 턴2: fetch_audit_log (서로 다른 도구 2종류 확보 — 하지만 network은 아직 없음)
+        {
+            "facts": [], "hypotheses": [], "unknowns": [],
+            "new_evidence": [
+                {"description": "audit 증거", "layer": "process", "event_type": "x", "source_log": "audit.log",
+                 "time": None, "supporting_hypothesis": [], "contradicting_hypothesis": [],
+                 "confidence_contribution": 0.2, "contradicting": False},
+            ],
+            "next_action": "call_tool",
+            "tool_call": {"tool_name": "fetch_audit_log", "args": {"host": "h1", "start_time": "a", "end_time": "b"}, "reasoning": "..."},
+            "termination_reason": None, "final_verdict": None, "investigation_notes": [],
+        },
+        # 턴3: 도구 2종류(auth+audit)는 채웠지만 network이 없는 채로 종료 시도
+        # -> src_ip 게이트 조건에 걸려 거부되어야 함
+        {
+            "facts": [], "hypotheses": [], "unknowns": [], "new_evidence": [],
+            "next_action": "terminate", "tool_call": None,
+            "termination_reason": "confidence_sufficient",
+            "final_verdict": {"verdict": "THREAT_CONFIRMED", "confidence": 0.90, "severity": "HIGH", "attack_type": "x", "affected_systems": []},
+            "investigation_notes": [],
+        },
+        # 턴4(거부 후 재시도): fetch_network_log 호출
+        {
+            "facts": [], "hypotheses": [], "unknowns": [],
+            "new_evidence": [
+                {"description": "network 증거: 추가 통신 없음", "layer": "network", "event_type": "x", "source_log": "network.log",
+                 "time": None, "supporting_hypothesis": [], "contradicting_hypothesis": [],
+                 "confidence_contribution": 0.0, "contradicting": False},
+            ],
+            "next_action": "call_tool",
+            "tool_call": {"tool_name": "fetch_network_log", "args": {"host": "h1", "start_time": "a", "end_time": "b"}, "reasoning": "..."},
+            "termination_reason": None, "final_verdict": None, "investigation_notes": [],
+        },
+        # 턴5: 이제 network까지 확인했으니 종료 승인돼야 함
+        {
+            "facts": [], "hypotheses": [], "unknowns": [], "new_evidence": [],
+            "next_action": "terminate", "tool_call": None,
+            "termination_reason": "confidence_sufficient",
+            "final_verdict": {
+                "verdict": "THREAT_CONFIRMED", "confidence": 0.90, "severity": "HIGH",
+                "attack_type": "x", "affected_systems": ["h"],
+                "reasoning": "auth+audit+network 3계층 모두 확인 후 판정",
+            },
+            "investigation_notes": [],
+        },
+    ]
+    llm = FakeLLMClient(decisions)
+    registry = _mock_only_registry()
+    agent = InvestigationAgent(llm, registry, max_calls=8, confidence_threshold=0.85)
+
+    # SEED는 모듈 상단에서 이미 src_ip="203.0.113.45"를 갖고 있음
+    result = agent.run(SEED)
+
+    assert llm.call_count == 5, f"예상과 다른 호출 횟수: {llm.call_count}"
+    assert any(
+        "fetch_network_log로 네트워크 활동을 확인하지 않음" in n
+        for n in result["investigation_notes"]
+    ), "src_ip 게이트 거부 사유가 notes에 없음"
+    assert result["statistics"]["tool_calls_count"] == 3
+    assert {"fetch_auth_log", "fetch_audit_log", "fetch_network_log"} == {
+        t["tool_name"] for t in result["tools_called"]
+    }
+    assert result["final_verdict"]["verdict"] == "THREAT_CONFIRMED"
+    print("[PASS] test_src_ip_seed_requires_network_log")
+
+
 def test_real_tool_auto_discovery() -> None:
     """agent/tools/real/<도구이름>.py에 같은 이름의 함수를 넣으면 자동으로 연결되는지 확인.
     실제 팀원이 파일을 추가하는 상황을 그대로 재현: 파일을 실제로 썼다가 테스트 후 원복한다.
@@ -291,5 +559,8 @@ if __name__ == "__main__":
     test_duplicate_tool_call_is_skipped()
     test_max_call_forces_termination()
     test_tool_failure_does_not_stop_investigation()
+    test_confidence_sufficient_blocked_when_single_tool_type()
+    test_confidence_sufficient_allows_remaining_unknowns()
+    test_src_ip_seed_requires_network_log()
     test_real_tool_auto_discovery()
     print("\n모든 테스트 통과.")

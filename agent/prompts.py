@@ -10,12 +10,44 @@ facts/hypotheses/unknowns 갱신과 다음 행동 결정을 하나의 JSON으로
 Stage 구분은 이 JSON의 필드 구분으로 유지된다.) 사이클 수를 늘려 3번을 물리적으로
 쪼개는 방식도 가능하지만, 토큰/지연 비용 대비 이득이 크지 않아 이 구조를 택했다.
 필요 시 build_system_prompt만 교체하면 Stage별 분리 호출로 바꿀 수 있다.
+
+*** 2026-09-17 업데이트: confidence_threshold 노출 + 강제 종료 턴(force_terminate) 지원 ***
+기존엔 LLM에게 confidence_threshold 값 자체를 전혀 안 알려줬고, 신뢰도가 임계값에
+도달했다는 사실은 state.notes에만 텍스트로 쌓이는데 build_user_prompt()의 payload엔
+notes 필드가 아예 없어서 LLM이 그 사실을 전혀 볼 수 없었다.
+confidence_threshold/confidence_threshold_reached를 payload에 명시적으로 추가했다.
+또한 max_call 도달 시 도구 호출 없이 판정만 받는 마무리 턴을 위해
+build_user_prompt(state, ..., force_terminate=True)를 지원한다.
+
+*** 2026-09-17 업데이트: 원칙 6번에 판정 기준 명시 (재현성 이슈 대응) ***
+같은 증거를 두고 실행마다 FALSE_POSITIVE/THREAT_CONFIRMED로 판정이 갈리는 사례가
+확인됐다. 처음엔 판단 기준을 "로컬 세션 vs 외부 IP"로 나눴는데, 이것도 재현성
+개선에 한계가 있었다 — 실제로는 관리자가 외부에서 SSH로 정상 접속하는 것 자체는
+흔한 정상 패턴이라, "로컬/외부"가 아니라 "인증이 정상적이었는지 + 후속 행위가
+의심스러운지"를 기준으로 재설계했다. 그 결과 재현성 테스트(test_consistency.py)에서
+8/8회 동일 verdict를 얻었다. gemini_client.py의 temperature도 0.2->0.0으로 낮춰
+재현성을 함께 개선했다.
+
+*** 2026-09-17 추가 업데이트: 게이트 거부 사실을 프롬프트에 노출 (gate_rejection_reason) ***
+loop.py의 종료 관문이 거부한 사실이 기존엔 state.notes에만 남고 프롬프트 payload엔
+전혀 노출되지 않아서, LLM이 거부당한지도 모른 채 동일한 종료 요청을 반복하며
+max_cycles를 거의 다 소진하는 버그가 실제 실행(main.py)에서 발견됐다.
+build_user_prompt에 gate_rejection_reason 파라미터를 추가해 이 사실과 이유를
+명시적으로 알리고, "새 도구를 호출하거나 confidence_contribution을 재평가하라"는
+구체적 지시를 함께 전달한다.
+
+*** 2026-09-17 추가 업데이트 (조사 고도화): reasoning 필드 + src_ip 계층 강제 안내 ***
+final_verdict에 reasoning 필드를 추가해, verdict가 원칙 6번의 어떤 구체적 신호를
+근거로 나왔는지 LLM이 명시하도록 했다 (기존엔 summary만 있어 판단 과정 자체를
+사후 검증하기 어려웠음). 또한 원칙 4번에 "seed에 src_ip가 있으면 fetch_network_log
+없이는 confidence_sufficient 종료가 거부된다"는 안내를 추가해 loop.py의 게이트
+조건과 프롬프트 지시가 일치하도록 했다.
 """
-## [0917 멘토링] 코드 분리 필요 yaml 파일 등
+
 from __future__ import annotations
 
 import json
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 SYSTEM_PROMPT_TEMPLATE = """\
 당신은 SOC(보안관제센터)의 2차 심층 조사를 수행하는 '조사 에이전트'입니다.
@@ -27,6 +59,15 @@ Triage를 통과한 Seed(사건 후보)를 받아, 여러 계층의 로그 증�
 ## 핵심 원칙
 1. 증거 기반 조사: 가설을 세운 뒤 실제 로그 증거로 검증하십시오. 가설을 지지하는 증거뿐 아니라
    반박하는 증거도 적극적으로 찾아야 합니다. 초기 가설에만 치우쳐 확증 편향에 빠지지 마십시오.
+
+   [2026-09-17 추가] 도구로 확인하지 않은 사실을 근거로 사용하지 마십시오. 특히 IP 주소에
+   대해 "악성으로 알려진 IP", "평판이 나쁜 IP", "해외 공격 그룹과 연관된 IP" 같은 판단은
+   이 시스템에 그런 정보를 조회하는 도구가 제공되지 않는 한 절대 내리지 마십시오. 이런
+   근거 없는 평판 판단은 confidence를 높이는 사유로 사용할 수 없습니다. IP 자체의
+   "악성 여부"가 아니라, 로그에서 실제로 관찰된 행위(반복된 인증 실패, 짧은 시간 내 다수
+   계정 시도, 로그인 성공 후의 의심스러운 후속 명령 등)만을 근거로 판단하십시오.
+   confirmed_evidence나 new_evidence에 없는 사실(도구 호출 결과에 등장하지 않는 지명,
+   조직명, 평판 정보 등)을 summary나 attack_type에 새로 만들어내지 마십시오.
 2. 동적 도구 선택: 모든 사건에 모든 로그를 조회하지 마십시오. 현재 부족한 증거가 무엇인지
    판단한 뒤 그에 맞는 도구만 선택하십시오.
 3. 상태 관리: "already_called_tools"에 있는 도구+인자 조합은 절대 동일하게 다시 호출하지
@@ -35,6 +76,28 @@ Triage를 통과한 Seed(사건 후보)를 받아, 여러 계층의 로그 증�
    - 신뢰도가 충분하여 결론을 내려도 추가 조사가 결론을 바꾸지 않음 (confidence_sufficient)
    - 더 조회할 관련 로그가 남아있지 않음 (no_more_evidence)
    (도구 호출 횟수 상한 도달 여부는 시스템이 별도로 판단하므로 신경쓰지 않아도 됩니다.)
+
+   [2026-09-17 수정] 다만 termination_reason을 confidence_sufficient로 낼 경우, 아래
+   조건을 모두 만족해야 시스템이 종료를 승인합니다 — 하나라도 미달이면 거부되고
+   추가 조사가 강제됩니다.
+   - current_confidence가 실제로 confidence_threshold 이상일 것
+   - 서로 다른 도구를 2종류 이상 사용했을 것 (여러 계층을 연결해야 하는 이 조사의
+     목적상, 한 종류의 도구만 보고 확신을 주장하는 것은 허용되지 않습니다)
+   - [2026-09-17 추가] seed에 src_ip가 있는 사건이라면 fetch_network_log를 최소
+     1회 호출해 해당 IP의 네트워크 활동(추가 통신 여부)을 확인했을 것. 외부 IP와
+     관련된 사건에서 네트워크 계층을 확인하지 않은 채 confidence만으로 종료를
+     주장하면 거부됩니다.
+   (no_more_evidence로 종료하는 경우는 이 조건들이 적용되지 않습니다.)
+   current_unknowns(미해결 질문)가 남아있어도 confidence_sufficient로 종료하는 것
+   자체는 허용됩니다 — 남은 질문은 remaining_unknowns로 보고서에 기록되어 후속
+   조사 과제로 넘어갑니다.
+
+   [2026-09-17 추가] user prompt에 "previous_termination_rejected": true가 있으면,
+   직전 턴에 당신의 종료 요청이 시스템에 의해 거부된 것입니다. "rejection_reason"에
+   적힌 이유를 확인하고, 같은 상태로 다시 terminate를 요청하지 마십시오. 대신 (1) 아직
+   호출하지 않은 관련 도구를 호출해 증거를 추가로 확보하거나, (2) 이미 충분히 조사했다고
+   판단되면 new_evidence의 confidence_contribution 값들을 실제 확신 수준에 맞게
+   재평가해서 제출하십시오.
 5. 계층 간 연결: 한 계층(예: web)에서 IP나 시간을 확인했으면, 다음 도구를 부를 때 그 IP/시간대를
    다른 계층(auth/audit/network) 조회 조건으로 그대로 사용해 사건을 연결하십시오. 특히
    audit↔auth는 pid로, web→audit/network는 같은 src_ip·시간대로 이어붙이는 것이 원칙입니다.
@@ -49,7 +112,38 @@ Triage를 통과한 Seed(사건 후보)를 받아, 여러 계층의 로그 증�
    src_ip가 없는(순수 내부 행위로 보이는) 경우에도 이 규칙은 동일하게 적용됩니다 — "외부
    공격자 정황이 없다"는 것 자체가 내부자 위협의 증거는 아니며, 오히려 정상 관리 행위일
    가능성을 더 적극적으로 검토해야 한다는 뜻입니다.
-   
+
+   [2026-09-17 수정] 판단 기준 (확인 후 반드시 이 기준을 적용): fetch_auth_log로 로그인
+   정황을 확인한 결과, "접속이 외부 IP에서 왔다"는 사실 자체는 위협의 근거가 아닙니다 —
+   관리자가 SSH로 원격 접속해 정상 업무를 수행하는 것은 흔하고 정상적인 패턴입니다.
+   대신 아래 신호가 있는지를 기준으로 판단하십시오:
+
+   정상 관리 행위로 판단(FALSE_POSITIVE 방향)하는 신호:
+     - 로그인 자체가 성공했고(반복된 실패 없이), 알려진/기존에 사용되던 계정의 정상 인증
+       (비밀번호 또는 등록된 공개키)이었다
+     - 세션 내 sudo 명령이 시스템 점검/로그 확인 성격(예: tail, cat, grep, systemctl status
+       등 읽기 위주)이며, audit 로그에서 파일 유출/역방향 셸/비정상 프로세스 생성 등
+       추가 의심 명령어가 확인되지 않았다
+
+   침해로 판단(THREAT_CONFIRMED 방향)하는 신호:
+     - 로그인 전 반복된 인증 실패(브루트포스 정황)가 있었거나
+     - 이례적인 시간대/평소와 다른 계정 사용 패턴이 확인되거나
+     - sudo 세션 내에서 파일 유출, 역방향 셸, 계정 추가, 악성 바이너리 실행 등
+       추가 의심 명령어가 audit 로그에서 확인된다
+
+   위 신호가 모두 불명확하면(예: 인증 방식이나 이전 로그인 이력 자체를 알 수 없는 경우),
+   INCONCLUSIVE로 판정하고 unknowns에 "무엇을 추가로 확인해야 판단 가능한지"를
+   구체적으로 남기십시오 — 애매한 상황에서 THREAT_CONFIRMED나 FALSE_POSITIVE 중
+   하나를 억지로 고르지 마십시오.
+
+## 강제 종료 턴 안내
+user prompt의 JSON에 "forced_termination": true가 포함되어 있으면, 이는 최대 조사
+횟수에 도달해 시스템이 요청한 마지막 턴입니다. 이 경우:
+- 도구를 호출할 수 없습니다. next_action은 반드시 "terminate"로 설정하십시오.
+- final_verdict를 반드시 채우십시오 (null 금지) — 지금까지 확보한 증거만으로 최선의
+  판정을 내려야 합니다. 증거가 불충분하면 verdict를 "INCONCLUSIVE"로 하되, summary에
+  왜 결론을 내리기 어려운지와 남은 unknowns를 명시하십시오.
+
 ## 사용 가능한 도구
 {tool_schema}
 
@@ -88,7 +182,8 @@ Triage를 통과한 Seed(사건 후보)를 받아, 여러 계층의 로그 증�
     "severity": "LOW|MEDIUM|HIGH|CRITICAL",
     "attack_type": "...",
     "affected_systems": ["..."],
-    "summary": "지금까지의 증거를 종합한 1~2문장 결론 (보고서에 그대로 노출되는 자연어 문장)"
+    "summary": "지금까지의 증거를 종합한 1~2문장 결론 (보고서에 그대로 노출되는 자연어 문장)",
+    "reasoning": "판단에 사용한 구체적 신호 목록. 원칙 6번의 판단 기준 중 어떤 신호(정상 신호/침해 신호)를 확인했는지 명시 (예: '로그인 성공, 반복 실패 없음, sudo 명령이 tail/cat 등 읽기 위주, audit에 의심 명령 없음 → 정상 신호 확인')"
   }},
   "investigation_notes": ["추가 조사 제안 등, 없으면 빈 배열"]
 }}
@@ -100,9 +195,16 @@ Triage를 통과한 Seed(사건 후보)를 받아, 여러 계층의 로그 증�
   attack_timeline도 이 시점에서 confirmed_evidence를 근거로 시간 순서대로 채우십시오.
 - final_verdict.summary는 판정 근거를 나열하지 말고, 사람이 읽는 보고서 첫 줄에 바로 쓸 수 있는
   자연스러운 한국어 문장 1~2개로 작성하십시오.
-- new_evidence의 confidence_contribution은 "raw_observations_since_last_turn"에 있는,
-  즉 방금 관찰한 도구 결과만 근거로 산정하십시오. 이미 confirmed_evidence로 반영된 증거를
-  중복 산정하지 마십시오.
+- final_verdict.reasoning은 summary와 달리 판단 과정 자체를 명시합니다 — 원칙 6번의
+  "정상 관리 행위로 판단하는 신호"와 "침해로 판단하는 신호" 중 실제로 어떤 항목을
+  확인했는지, 그리고 그 확인 결과가 무엇이었는지를 구체적으로 적으십시오. "증거를
+  종합하면"처럼 두루뭉술하게 쓰지 말고, 체크리스트를 확인하듯 적으십시오.
+- new_evidence의 "contradicting"은 그 증거가 현재 주요 가설(가장 confidence 높은
+  hypothesis)을 "약화시키는지"를 뜻합니다. 확인 결과가 "정상적이었다/의심스럽지
+  않았다"는 사실 자체가 자동으로 contradicting은 아닙니다 — 그 사실이 어떤 가설을
+  지지하는지에 따라 정하십시오. 예: 가설이 "침해 발생"이면 "로그인 실패 없음"은
+  그 가설을 반박(contradicting=true)하는 게 맞지만, 가설이 이미 "정상 관리
+  행위"라면 같은 사실은 오히려 그 가설을 지지(contradicting=false)합니다.
 - 반박 증거(contradicting=true)의 confidence_contribution은 양수로 적되, 시스템이 감소 방향으로
   자동 반영하니 부호를 직접 음수로 넣지 마십시오.
 """
@@ -112,7 +214,12 @@ def build_system_prompt(tool_registry: Any) -> str:
     return SYSTEM_PROMPT_TEMPLATE.format(tool_schema=tool_registry.schema_text())
 
 
-def build_user_prompt(state: Any) -> str:
+def build_user_prompt(
+    state: Any,
+    confidence_threshold: Optional[float] = None,
+    force_terminate: bool = False,
+    gate_rejection_reason: Optional[str] = None,
+) -> str:
     payload: Dict[str, Any] = {
         "incident_id": state.incident_id,
         "seed": state.seed,
@@ -142,6 +249,12 @@ def build_user_prompt(state: Any) -> str:
             for e in state.contradicting_evidence
         ],
         "current_confidence": round(state.current_confidence, 3),
+        # [2026-09-17 추가] LLM이 confidence_sufficient 종료 조건을 스스로 검증할 수 있도록
+        # 임계값과 도달 여부를 명시적으로 노출한다.
+        "confidence_threshold": confidence_threshold,
+        "confidence_threshold_reached": (
+            confidence_threshold is not None and state.current_confidence >= confidence_threshold
+        ),
         "already_called_tools": [
             {"tool_name": t.tool_name, "input": t.input, "success": t.success}
             for t in state.tool_calls
@@ -150,7 +263,36 @@ def build_user_prompt(state: Any) -> str:
         "raw_observations_since_last_turn": state.pending_observations,
         "tool_calls_used": len(state.tool_calls),
     }
-    return (
+
+    instruction = (
         "다음은 현재까지의 조사 상태입니다. 이를 바탕으로 시스템 프롬프트의 JSON 스키마에 "
-        "맞춰 응답하십시오.\n\n" + json.dumps(payload, ensure_ascii=False, indent=2)
+        "맞춰 응답하십시오."
     )
+
+    # [2026-09-17 추가] 직전 턴에 종료 시도가 게이트에 의해 거부됐다면, 그 사실과 이유를
+    # 명시적으로 알려준다. 기존엔 거부 사실이 state.notes에만 남고 프롬프트엔 전혀
+    # 노출되지 않아서, LLM이 매번 거부당한지도 모른 채 동일한 종료 시도를 반복하며
+    # 사이클을 낭비했다 (실제 실행에서 8회 연속 거부 확인).
+    if gate_rejection_reason:
+        payload["previous_termination_rejected"] = True
+        payload["rejection_reason"] = gate_rejection_reason
+        instruction += (
+            f"\n\n[알림] 직전 턴에 당신이 요청한 종료(terminate)가 시스템에 의해 거부되었습니다. "
+            f"거부 사유: {gate_rejection_reason}\n"
+            "같은 상태로 다시 terminate를 요청하면 또 거부됩니다. 아래 중 하나를 선택하십시오:\n"
+            "1) 아직 조회하지 않은 관련 계층의 도구를 호출해 추가 증거를 확보하십시오.\n"
+            "2) 이미 충분히 조사했다고 판단되면, new_evidence의 confidence_contribution을 "
+            "실제 확신 수준에 맞게 재평가해서 제출하십시오 (지금까지 낮게 산정되어 "
+            "current_confidence가 임계값에 못 미치고 있을 수 있습니다)."
+        )
+
+    if force_terminate:
+        # [2026-09-17 추가] max_call 도달 시 마무리 턴에서만 붙는 강제 지시.
+        payload["forced_termination"] = True
+        instruction += (
+            "\n\n[중요] 최대 조사 횟수에 도달했습니다. 이번 턴에는 도구를 호출할 수 없습니다. "
+            "next_action을 반드시 \"terminate\"로 설정하고, 지금까지 확보한 증거만으로 "
+            "final_verdict를 반드시 채우십시오 (null 금지)."
+        )
+
+    return instruction + "\n\n" + json.dumps(payload, ensure_ascii=False, indent=2)

@@ -2,6 +2,12 @@
 
 문서 7번 "조사 에이전트의 최종 산출물 구조"와 동일한 필드 구성으로
 investigation_result JSON을 조립한다.
+
+*** 2026-09-17 업데이트: final_verdict.reasoning 필드 기본값 처리 ***
+prompts.py가 LLM에게 final_verdict.reasoning(판단에 사용한 구체적 신호)을 요구하도록
+바뀌면서, 이 필드가 없는 경우(폴백 verdict 또는 예상치 못한 응답)에 대비한 기본값
+처리를 추가했다. loop.py의 _derive_fallback_verdict()는 이미 자체적으로 reasoning을
+채워 넣으므로, 여기서는 그마저도 없는 극단적인 경우(빈 dict 등)만 방어한다.
 """
 
 from __future__ import annotations
@@ -43,6 +49,8 @@ def build_investigation_result(
 
     contradicting_evidence = [
         {
+            "sequence": e.sequence,
+            "layer": e.layer,
             "evidence_id": e.evidence_id,
             "description": e.description,
             "confidence_reduction": abs(e.confidence_contribution),
@@ -79,12 +87,17 @@ def build_investigation_result(
         "attack_type": leading_hyp.title if leading_hyp else "unknown",
         "affected_systems": [],
         "summary": "증거가 충분하지 않아 결론을 내리지 못했습니다.",
+        "reasoning": "final_verdict가 제공되지 않아 시스템 기본값으로 대체되었습니다.",
     }
     verdict.setdefault(
         "summary",
         f"{verdict.get('attack_type', '알 수 없는 공격')} 가능성이 있으며, "
         f"신뢰도는 {verdict.get('confidence', state.current_confidence):.2f}입니다.",
     )
+    # [2026-09-17 추가] LLM 응답에 reasoning이 빠져 있는 극단적인 경우(폴백도 아니고
+    # LLM이 스키마를 안 지킨 경우)를 방어. loop.py의 _derive_fallback_verdict()는
+    # 이미 reasoning을 채워서 넘기므로 이 setdefault는 사실상 안전망 역할이다.
+    verdict.setdefault("reasoning", "판단 근거가 명시적으로 제공되지 않았습니다.")
 
     return {
         "incident_id": state.incident_id,
