@@ -14,12 +14,22 @@ audit/web과 같은 패턴: 파싱 로직(정규식 분류)은 팀원이 만든 
 실제 auth.log는 SSH 브루트포스 하나로도 399건씩 매칭될 수 있다(직접 확인함).
 한 번에 다 반환하면 LLM 컨텍스트가 커지므로, 팀원이 설계한 limit/offset 방식을
 그대로 채택했다 — 결과가 많으면 has_more/next_offset을 보고 LLM이 필요하면
-next_offset으로 이어서 더 조회할 수 있다. (다른 3개 tool은 결과가 상대적으로
-적어서 아직 페이지네이션이 없다 — 필요해지면 같은 방식으로 추가하면 된다.)
+next_offset으로 이어서 더 조회할 수 있다.
 
 *** syslog 연도 한계 ***
 auth.log(syslog)엔 연도가 없어서, 조사 요청의 start_time 연도를 reference_year로
 써서 절대 시각을 복원한다. 연말/연초 경계를 걸친 조회는 정확하지 않을 수 있다.
+
+*** 2026-09-17 업데이트: auth_parser.py에 auth_method 필드 추가됨 ***
+파서 쪽(parsers/auth_parser.py)에서 Accepted publickey 로그인도 인식하도록
+바뀌면서, 각 인증 이벤트에 auth_method("password"/"publickey"/None)가 추가로
+붙어 나온다. 이 파일은 그 결과를 그대로 records에 실어 나르기만 하면 되므로
+별도 수정은 필요 없다 — records 항목에 auth_method 키가 자동으로 포함됨.
+
+*** 2026-09-17 업데이트: 권한 에러 처리 ***
+로컬 파일이 root 소유라 비root 프로세스가 못 읽는 경우 PermissionError를
+명시적으로 잡아서 source_label에 "(권한 없음)"을 남긴다. scanned_objects가
+0이 되어 아래쪽 "데이터를 찾지 못했습니다" 요약에 그 라벨이 그대로 노출된다.
 
 필요 환경변수 (.env에 추가):
   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_DEFAULT_REGION
@@ -52,8 +62,11 @@ def _read_source_text(host: str, start: datetime, end: datetime) -> "tuple[str, 
     if local_path:
         if not os.path.exists(local_path):
             return "", 0, f"local:{local_path} (파일 없음)"
-        with open(local_path, "r", encoding="utf-8", errors="replace") as f:
-            return f.read(), 1, f"local:{local_path}"
+        try:
+            with open(local_path, "r", encoding="utf-8", errors="replace") as f:
+                return f.read(), 1, f"local:{local_path}"
+        except PermissionError:
+            return "", 0, f"local:{local_path} (권한 없음)"
 
     import boto3  # 실제 호출 시에만 필요하므로 지연 import
 
@@ -108,7 +121,7 @@ def fetch_auth_log(args: Dict[str, Any]) -> Dict[str, Any]:
         summary = (
             f"{host}의 {start.isoformat()}~{end.isoformat()} 구간에서 ({source_label}) "
             f"조건에 맞는 인증 이벤트 총 {total_matched}건 중 {page_desc} {len(page)}건 반환. "
-            f"({more_desc}, event_type/result까지 구조화)"
+            f"({more_desc}, event_type/result/auth_method까지 구조화)"
         )
 
     return {

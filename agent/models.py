@@ -81,7 +81,7 @@ class ConfidenceStep:
     confidence: float
     reason: str
 
-
+# [19] agent/loop.py에서 실행함. 조사 진행 상태 담는 컨테이너 생성하고 반환
 @dataclass
 class AgentState:
     """조사 진행 상태 전체를 담는 컨테이너.
@@ -114,12 +114,31 @@ class AgentState:
     # 매 reason() 호출 뒤 loop.py에서 비운다.
     pending_observations: List[Dict[str, Any]] = field(default_factory=list)
 
+    # [0917 희진] _to_hashable 메소드 추가
+    @staticmethod
+    def _to_hashable(value: Any) -> Any:
+        """dict/list처럼 해싱 불가능한 인자 값도 시그니처에 넣을 수 있도록 변환.
+
+        LLM이 tool 인자로 리스트(예: status_code=[200, 404])나 딕셔너리를 넘기면
+        tuple(sorted(args.items()))에서 TypeError: unhashable type이 났었다.
+        """
+        if isinstance(value, dict):
+            return tuple(sorted((k, AgentState._to_hashable(v)) for k, v in value.items()))
+        if isinstance(value, (list, tuple, set)):
+            return tuple(AgentState._to_hashable(v) for v in value)
+        return value
     # ------------------------------------------------------------------
     # 중복 조사 방지
     # ------------------------------------------------------------------
+    # [0917 희진] _signature 메소드 교체
+    # 문제 : tool 인자에 리스트 오면 해싱 예외
+    # 해결 : state.already_called()(models.py) 쪽 해싱 로직에 방어 코드 추가
     @staticmethod
     def _signature(tool_name: str, args: Dict[str, Any]) -> Tuple[str, Tuple[Tuple[str, Any], ...]]:
-        return (tool_name, tuple(sorted(args.items())))
+        return (
+            tool_name,
+            tuple(sorted((k, AgentState._to_hashable(v)) for k, v in args.items())),
+        )
 
     def already_called(self, tool_name: str, args: Dict[str, Any]) -> bool:
         return self._signature(tool_name, args) in self.called_signatures

@@ -10,6 +10,14 @@ syslog 형식(auth.log)은 한 줄에 연도가 없어서("Sep 11 09:04:37"), �
 reference_year를 넘겨줘야 절대 시각으로 변환할 수 있다. 조사 요청의 start_time
 연도를 그대로 쓰면 되지만, 연말/연초 경계(12/31 -> 1/1)를 넘나드는 조회는
 정확하지 않을 수 있다는 한계가 있다 (팀원 원본도 동일한 한계).
+
+*** 2026-09-17 업데이트: publickey 로그인 인식 + auth_method 필드 추가 ***
+원래 SSH_SUCCESS_RE가 "Accepted password for..."만 인식해서, EC2 기본
+접속 방식인 키 로그인 성공(Accepted publickey for...)은 아예 안 잡히고 있었다
+(그래서 "ssh 로그인 0건"으로 나와 침해 성공 여부를 판단할 수 없었음).
+SSH_PUBKEY_SUCCESS_RE를 추가해서 잡되, "비번으로 뚫렸는지 키로 들어왔는지"를
+나중에 구분할 수 있도록 각 이벤트에 auth_method("password"/"publickey"/None)
+필드를 새로 붙였다. sudo/pam 이벤트는 인증 방식이 로그에 안 나타나므로 None.
 """
 
 from __future__ import annotations
@@ -37,6 +45,11 @@ LOG_LINE_RE = re.compile(
 # "from " 뒤에 배치해서 그 자리의 숫자.점 문자열을 IP로 간주한다 (DNS 조회 없이 원문 그대로 신뢰).
 SSH_FAILURE_RE = re.compile(r"Failed password for (invalid user )?(?P<user>\S+) from (?P<ip>[\d.]+)")
 SSH_SUCCESS_RE = re.compile(r"Accepted password for (?P<user>\S+) from (?P<ip>[\d.]+)")
+# [2026-09-17 추가] 키 기반 로그인 성공. "Accepted publickey for admin from 1.2.3.4
+# port 51122 ssh2: RSA SHA256:..." 형태 — password와 "from " 뒤 IP 위치가 동일해서
+# 같은 패턴을 재사용한다. 뒤에 붙는 키 타입/지문은 지금 스키마엔 필드가 없어서
+# 캡처하지 않는다.
+SSH_PUBKEY_SUCCESS_RE = re.compile(r"Accepted publickey for (?P<user>\S+) from (?P<ip>[\d.]+)")
 
 # [IP를 어떻게 가져왔나] "sudo:   ubuntu : TTY=pts/0 ; PWD=/home/ubuntu ; USER=root ; COMMAND=..."
 # 형태에서 COMMAND= 뒤 내용 길이가 제각각이라 위치를 고정할 수 없어서, RHOST=를 메시지
@@ -54,26 +67,59 @@ PAM_RHOST_RE = re.compile(r"rhost=(?P<ip>[\d.]+)", re.IGNORECASE)
 
 
 def _classify_line(message: str) -> Optional[Dict[str, Any]]:
-    """message를 위 정규식들로 순서대로 검사해서, 명세가 요구하는 4개 필드
-    (event_type/user/source_ip/result)로 통일된 dict를 반환한다. 매칭 안 되면 None
-    (아직 이름 붙지 않은 이벤트는 여기서 걸러짐).
+    """message를 위 정규식들로 순서대로 검사해서, 명세가 요구하는 5개 필드
+    (event_type/user/source_ip/result/auth_method)로 통일된 dict를 반환한다. 매칭 안 되면
+    None (아직 이름 붙지 않은 이벤트는 여기서 걸러짐).
     """
     if m := SSH_FAILURE_RE.search(message):
-        return {"event_type": "ssh_login", "user": m.group("user"), "source_ip": m.group("ip"), "result": "failure"}
+        return {
+            "event_type": "ssh_login",
+            "user": m.group("user"),
+            "source_ip": m.group("ip"),
+            "result": "failure",
+            "auth_method": "password",
+        }
 
     if m := SSH_SUCCESS_RE.search(message):
-        return {"event_type": "ssh_login", "user": m.group("user"), "source_ip": m.group("ip"), "result": "success"}
+        return {
+            "event_type": "ssh_login",
+            "user": m.group("user"),
+            "source_ip": m.group("ip"),
+            "result": "success",
+            "auth_method": "password",
+        }
+
+    if m := SSH_PUBKEY_SUCCESS_RE.search(message):
+        return {
+            "event_type": "ssh_login",
+            "user": m.group("user"),
+            "source_ip": m.group("ip"),
+            "result": "success",
+            "auth_method": "publickey",
+        }
 
     if m := SUDO_RE.search(message):
         rhost_match = SUDO_RHOST_RE.search(message)
         ip = rhost_match.group("ip") if rhost_match else None
-        return {"event_type": "sudo", "user": m.group("user"), "source_ip": ip, "result": "success"}
+        return {
+            "event_type": "sudo",
+            "user": m.group("user"),
+            "source_ip": ip,
+            "result": "success",
+            "auth_method": None,
+        }
 
     if m := PAM_RE.search(message):
         result = "success" if "success" in m.group("result") else "failure"
         rhost_match = PAM_RHOST_RE.search(message)
         ip = rhost_match.group("ip") if rhost_match else None
-        return {"event_type": "pam", "user": m.group("user"), "source_ip": ip, "result": result}
+        return {
+            "event_type": "pam",
+            "user": m.group("user"),
+            "source_ip": ip,
+            "result": result,
+            "auth_method": None,
+        }
 
     return None
 
@@ -117,8 +163,6 @@ def parse_auth_events(
         if log_time is None:
             continue
         if log_time.tzinfo is None:
-            # syslog 원문엔 timezone이 없어서 naive datetime이 나온다. 우리 시스템은
-            # 전부 UTC 기준(parse_iso 등)이라, 비교/직렬화 전에 UTC로 맞춰준다.
             log_time = log_time.replace(tzinfo=timezone.utc)
         if time_window is not None:
             start, end = time_window
@@ -145,6 +189,7 @@ def parse_auth_events(
                 "user": classified["user"],
                 "event_type": classified["event_type"],
                 "result": classified["result"],
+                "auth_method": classified["auth_method"],
                 "raw_log_ref": f"auth.log:{raw_log_counter}",
             }
         )

@@ -16,6 +16,20 @@ parsers/network_parser.py 상단 주석 참고 (호스트 IP 사전 등록 단�
 
 *** limit/offset 페이지네이션 채택 (auth와 동일한 이유) ***
 
+*** 2026-09-17 업데이트: web↔network join 복구 (이 파일 자체는 무수정) ***
+Suricata가 nginx↔백엔드 사이 loopback 트래픽을 봐서 src_ip가 127.0.0.1 등으로
+찍히는 문제가 있었다 — 처음엔 "nginx 대신 apache를 써야 하나"로 오해했지만,
+실제 원인은 network_parser.py가 http.xff/url/http_method/status 필드를 아예
+안 뽑고 있었던 것이었다. 그래서 web 레이어(fetch_web_log.py)는 그대로 nginx
+파서를 유지하고, network_parser.py 쪽에 http 서브객체 파싱을 추가해서 src_ip
+필터가 xff도 함께 매칭하도록 고쳤다. 이 파일(tool wrapper)은 파서를 그대로
+호출만 하므로 변경 사항 없음 — 반환되는 records에 url/http_method/status/xff
+필드가 자동으로 추가되어 나온다.
+
+*** 2026-09-17 업데이트: 권한 에러 처리 ***
+로컬 파일이 root 소유라 비root 프로세스가 못 읽는 경우 PermissionError를
+명시적으로 잡아서 source_label에 "(권한 없음)"을 남긴다.
+
 필요 환경변수: AWS_ACCESS_KEY_ID 등 + NETWORK_LOG_BUCKET (기본값 ogwanwan-shop-bucket)
 로컬 테스트: .env에 NETWORK_LOG_LOCAL_PATH=sample_network.log
 """
@@ -40,8 +54,11 @@ def _read_source_text(host: str, start: datetime, end: datetime) -> "tuple[str, 
     if local_path:
         if not os.path.exists(local_path):
             return "", 0, f"local:{local_path} (파일 없음)"
-        with open(local_path, "r", encoding="utf-8", errors="replace") as f:
-            return f.read(), 1, f"local:{local_path}"
+        try:
+            with open(local_path, "r", encoding="utf-8", errors="replace") as f:
+                return f.read(), 1, f"local:{local_path}"
+        except PermissionError:
+            return "", 0, f"local:{local_path} (권한 없음)"
 
     import boto3  # 실제 호출 시에만 필요하므로 지연 import
 
@@ -97,7 +114,7 @@ def fetch_network_log(args: Dict[str, Any]) -> Dict[str, Any]:
         summary = (
             f"{host}의 {start.isoformat()}~{end.isoformat()} 구간에서 ({source_label}) "
             f"조건에 맞는 네트워크 이벤트 총 {total_matched}건 중 {page_desc} {len(page)}건 반환. "
-            f"({more_desc})"
+            f"({more_desc}, http 이벤트는 url/http_method/status/xff까지 포함)"
         )
 
     return {

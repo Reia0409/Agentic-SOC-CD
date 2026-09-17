@@ -10,6 +10,14 @@ IP와 이벤트의 src/dst를 비교해서 "이 트래픽이 내부/나가는/�
 그때그때 host 이름만 받음) 이 계산을 하지 않는다 — 대신 src_ip/dst_ip를 그대로
 반환하고, 어느 쪽이 공격자인지는 이미 seed 단계에서 IP를 알고 있는 LLM이
 판단하게 둔다. (필요해지면 host->IP 매핑을 추가해서 되살릴 수 있다.)
+
+*** 2026-09-17 업데이트: http.* 필드(xff/url/http_method/status) 추가 ***
+Suricata가 nginx↔백엔드 사이 loopback 트래픽을 보고 있어서 src_ip가
+127.0.0.1 등 내부 IP인 경우가 많았다. "nginx 대신 apache를 써야 하나"로
+오해했었는데, 실제 원인은 이 파서가 Suricata의 http 서브객체(진짜 클라이언트
+IP가 담긴 xff 포함)를 아예 안 뽑고 있었던 것이었다. web 레이어(fetch_web_log)와
+조인하려면 이 필드가 필요해서 추가했고, src_ip 필터도 xff와 함께 매칭하도록
+고쳤다.
 """
 
 from __future__ import annotations
@@ -58,6 +66,9 @@ def parse_network_events(
     eve.json은 원래부터 구조화된 포맷이라(팀 결정사항), json.loads()로 파싱하는 건
     "해석"이 아니라 "이미 있는 구조를 읽는 것"이다. alert.signature가 실제로 뭘
     뜻하는지 같은 의미 해석은 여기서 하지 않고 LLM에게 그대로 넘긴다.
+
+    event_type=="http" 레코드는 http.xff/url/http_method/status도 함께 반환한다
+    (web 레이어 이벤트와 대조하기 위함). 그 외 event_type이면 전부 None.
     """
     protocol = _normalize_protocol(protocol)
     events: List[Dict[str, Any]] = []
@@ -83,6 +94,9 @@ def parse_network_events(
         if alert_only and event_type != "alert":
             continue
 
+        http_data = record.get("http") or {}
+        xff = http_data.get("xff")
+
         ts = _extract_timestamp(record)
         if ts is not None:
             if ts.tzinfo is None:
@@ -94,7 +108,9 @@ def parse_network_events(
 
         record_protocol = _normalize_protocol(record.get("proto"))
 
-        if src_ip and record.get("src_ip") != src_ip:
+        # src_ip가 loopback이라 안 맞아도, xff가 진짜 클라이언트 IP를 담고
+        # 있을 수 있으므로 xff도 함께 확인한다 (web 레이어와 동일한 방식).
+        if src_ip and record.get("src_ip") != src_ip and xff != src_ip:
             continue
         if dst_ip and record.get("dest_ip") != dst_ip:
             continue
@@ -117,6 +133,10 @@ def parse_network_events(
                 "protocol": record_protocol,
                 "alert_signature": alert.get("signature") if isinstance(alert, dict) else None,
                 "flow_id": record.get("flow_id"),
+                "url": http_data.get("url"),
+                "http_method": http_data.get("http_method"),
+                "status": http_data.get("status"),
+                "xff": xff,
             }
         )
 
