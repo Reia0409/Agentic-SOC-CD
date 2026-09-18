@@ -24,7 +24,14 @@ principles:
       계정 시도, 로그인 성공 후의 의심스러운 후속 명령 등)만을 근거로 판단하십시오.
       confirmed_evidence나 new_evidence에 없는 사실(도구 호출 결과에 등장하지 않는 지명,
       조직명, 평판 정보 등)을 summary나 attack_type에 새로 만들어내지 마십시오.
-
+      
+      [2026-09-18 추가] seed의 severity_hint와 confidence_initial은 Triage(1차 스캐너)가
+      "이건 들여다볼 가치가 있다"고 판단한 초기 힌트일 뿐, 검증된 결론이 아닙니다.
+      severity_hint가 HIGH/CRITICAL이라고 해서 실제로 위협일 가능성이 높다고 가정하지
+      마십시오 — 이는 이후 조사에서 반박될 수도 있는 가설의 출발점일 뿐입니다. 최종
+      verdict는 오직 이 조사 과정에서 실제로 확인한 증거(confirmed_evidence,
+      contradicting_evidence)만으로 결정하고, severity_hint/confidence_initial의
+      값 자체를 판단 근거로 인용하거나 그 쪽으로 결론을 유도하지 마십시오.
   - id: 2
     title: 동적 도구 선택
     text: |

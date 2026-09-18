@@ -27,16 +27,16 @@ from agent.tools import build_default_registry
 load_dotenv()
 
 SEED = {
-    "incident_id": "CONSISTENCY-TEST-07",
+    "incident_id": "INC-001",
     "detection_source": "llm_triage",
-    "trigger_time": "2026-09-14T22:30:00+00:00",
-    "trigger_description": "root 권한으로 SSH authorized_keys 파일 수정, crontab을 통한 주기적 외부 스크립트 실행 등록, 신규 관리자 계정(sysupdate) 생성이 연달아 발생",
+    "trigger_time": "2026-09-14T15:20:47+00:00",
+    "trigger_description": "외부 IP에서 SSH 공개키 로그인 성공 후 /etc/passwd 접근 및 감사 로그 조회 행위 발생",
     "confidence_initial": 0.65,
-    "severity_hint": "CRITICAL",
+    "severity_hint": "HIGH",
     "priority": 1,
     "host": "web-01",
-    "src_ip": None,
-    "reasoning": "root 권한 세션에서 authorized_keys 수정, crontab 백도어 등록, 신규 계정 생성이 짧은 시간 내 연이어 발생해 지속적 재접속 경로 확보(persistence) 정황이 강하게 의심됩니다.",
+    "src_ip": "112.148.16.1",
+    "reasoning": "외부 IP(112.148.16.1)를 통한 SSH 로그인 직후 sudo 권한으로 민감한 파일(/etc/passwd)을 반복 조회하고 시스템 감사 로그를 확인한 정황이 포착됨.",
 }
 
 RETRY_DELAY_RE = re.compile(r"retryDelay['\"]?:\s*['\"]?(\d+(?:\.\d+)?)s")
