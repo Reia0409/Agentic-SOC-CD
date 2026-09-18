@@ -1,158 +1,165 @@
 [
   {
     "run": 1,
-    "verdict": "FALSE_POSITIVE",
-    "confidence": 0.85,
-    "severity": "LOW",
+    "verdict": "INCONCLUSIVE",
+    "confidence": 0.5,
+    "severity": "MEDIUM",
     "tool_calls_count": 3,
-    "termination_reason": "confidence_sufficient",
-    "evidence_count": 2,
-    "summary": "외부 IP에서 계정 인증 시도 후 공개키 인증에 성공했으나, 감사 및 네트워크 로그에서 후속 악성 행위나 통신이 전혀 발견되지 않아 정상적인 원격 접속 또는 단순 스캔 시도로 판단됩니다.",
+    "termination_reason": "no_more_evidence",
+    "evidence_count": 1,
+    "summary": "외부 IP로부터 공개키 인증을 통한 정상 계정 로그인 성공이 확인되었으나, 후속 명령어 실행이나 추가 통신 이력이 관찰되지 않아 위협 여부를 확정하기 어렵습니다.",
     "investigation_notes": [
-      "auth 로그에서 공개키 인증 성공이 확인되었으나, 이후 세션에서의 권한 상승 및 파일 접근 등 추가 행위를 확인하기 위해 audit 및 network 계층 조사가 필요함",
-      "network 로그 조회 후 추가 통신 여부를 확인하여 최종 판단을 내릴 예정입니다."
+      "auth 로그를 먼저 확인하여 로그인 성공 시점 전후의 인증 시도 및 방식(Q1, Q2)을 검증하고, 그 후 audit 및 network 로그를 조회할 예정입니다.",
+      "로그인 성공 이후의 audit 로그 및 네트워크 통신 로그를 추가로 확인하여 후속 행위를 조사할 예정",
+      "네트워크 로그 조회를 통해 해당 IP의 추가 통신 여부를 확인한 후 최종 판단을 수행할 예정입니다.",
+      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.50)가 임계값(0.85) 미달",
+      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.50)가 임계값(0.85) 미달",
+      "연속 2회 종료 거부 후에도 진전이 없어 강제 종료 턴으로 전환합니다."
     ],
     "evidence_layers": [
-      "auth",
-      "network"
+      "auth"
     ]
   },
   {
     "run": 2,
-    "verdict": "FALSE_POSITIVE",
-    "confidence": 0.88,
-    "severity": "LOW",
+    "verdict": "INCONCLUSIVE",
+    "confidence": 0.5,
+    "severity": "MEDIUM",
     "tool_calls_count": 3,
-    "termination_reason": "confidence_sufficient",
-    "evidence_count": 3,
-    "summary": "외부 IP에서의 초기 테스트 계정 로그인 시도는 무관한 스캔 행위로 판단되며, 이어 성공한 정상 계정 로그인은 공개키 인증을 통한 관리자의 정상 접속으로 확인되어 위협이 아닙니다.",
+    "termination_reason": "no_more_evidence",
+    "evidence_count": 1,
+    "summary": "외부 IP에서 존재하지 않는 계정 로그인 실패 직후 정상 계정 공개키 인증 성공이 확인되었으나, 후속 악성 행위나 추가 통신이 관측되지 않아 침해 여부를 단정하기 어렵습니다.",
     "investigation_notes": [
-      "공개키 인증 성공이 확인되었으므로, 해당 세션에서의 프로세스 실행 및 네트워크 통신 여부를 확인하여 정상 관리 행위인지 침해인지 최종 판단 필요",
-      "네트워크 로그 조회를 통해 해당 IP의 추가 통신 여부를 확인한 후 최종 판단 예정",
-      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.75)가 임계값(0.85) 미달"
+      "auth 로그 확인 후 sudo 및 audit 로그를 통해 Q3(후속 행위 범위)를 파악할 예정입니다.",
+      "auth 로그에서 인증 실패 및 성공 패턴을 확인했으나, 공개키 인증 이후의 후속 행위(audit 로그) 및 네트워크 통신(network 로그) 조사가 추가로 필요함.",
+      "audit 로그에서 ubuntu 계정의 활동이 직접 잡히지 않았으므로, network 로그를 통해 해당 IP의 추가적인 통신 여부를 확인하여 후속 행위를 파악할 필요가 있습니다.",
+      "ubuntu 계정의 audit 로그를 세션 범위로 추가 확인하여 내부 명령어 실행 여부를 검토할 수 있습니다.",
+      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.65)가 임계값(0.85) 미달",
+      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.65)가 임계값(0.85) 미달",
+      "연속 2회 종료 거부 후에도 진전이 없어 강제 종료 턴으로 전환합니다."
     ],
     "evidence_layers": [
-      "process",
-      "network",
       "auth"
     ]
   },
   {
     "run": 3,
     "verdict": "FALSE_POSITIVE",
-    "confidence": 0.88,
-    "severity": "LOW",
-    "tool_calls_count": 3,
-    "termination_reason": "confidence_sufficient",
-    "evidence_count": 2,
-    "summary": "외부 IP에서의 일시적인 계정 시도 후 등록된 공개키를 통한 정상 관리자 계정 로그인으로 확인되었으며, 로그인 후 추가적인 악성 행위나 외부 통신이 없어 정상적인 관리 목적의 접속으로 판단됩니다.",
-    "investigation_notes": [
-      "ubuntu 계정의 공개키 인증 성공 세션에서 수행된 프로세스 및 명령어를 확인한 후 최종 판단 예정",
-      "네트워크 로그 조회 후 추가 통신 여부가 확인되면 최종 판정을 내릴 예정임.",
-      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.65)가 임계값(0.85) 미달"
-    ],
-    "evidence_layers": [
-      "network",
-      "baseline"
-    ]
-  },
-  {
-    "run": 4,
-    "verdict": "FALSE_POSITIVE",
     "confidence": 0.9,
     "severity": "LOW",
     "tool_calls_count": 3,
     "termination_reason": "confidence_sufficient",
     "evidence_count": 1,
-    "summary": "관리자의 단순 계정명 오타 입력 후 등록된 공개키를 통한 정상적인 원격 접속으로 확인되었으며, 추가적인 위협 행위나 의심 통신은 관찰되지 않았습니다.",
+    "summary": "외부 IP에서의 일시적인 인증 실패 후 사전 등록된 공개키를 통한 정상 계정 로그인이 확인되었으나, 후속 의심 행위 및 외부 통신이 없어 정상적인 관리 행위로 판단됩니다.",
     "investigation_notes": [
-      "audit 로그를 통해 ubuntu 계정의 후속 행위를 확인한 뒤, network 로그로 추가 통신 여부를 조사할 예정입니다.",
-      "네트워크 로그 조회를 통해 해당 IP의 추가 통신 여부를 확인한 후 최종 판정을 내릴 예정입니다.",
-      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.25)가 임계값(0.85) 미달"
+      "ubuntu 계정의 로그인 방식이 강력한 인증(publickey)이고 실패 건수도 단일 계정(test) 대상으로 제한적이어서 정상적인 관리자 접속 가능성이 높아짐. 후속 audit 로그를 통해 최종 판단 예정.",
+      "네트워크 로그 조회를 통해 해당 IP의 추가 통신 여부를 확인하고 Q3 및 후속 행위 유무를 검증할 예정입니다.",
+      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.35)가 임계값(0.85) 미달"
     ],
     "evidence_layers": [
-      "baseline"
+      "auth"
+    ]
+  },
+  {
+    "run": 4,
+    "verdict": "INCONCLUSIVE",
+    "confidence": 0.5,
+    "severity": "MEDIUM",
+    "tool_calls_count": 3,
+    "termination_reason": "no_more_evidence",
+    "evidence_count": 1,
+    "summary": "외부 IP에서 계정 탐색 시도 후 공개키 인증으로 로그인이 성공했으나, 감사 로그 및 후속 네트워크 통신이 부재하여 추가적인 위협 행위를 확증할 수 없습니다.",
+    "investigation_notes": [
+      "auth 및 network 로그 조회 완료 후 audit 로그를 통해 ubuntu 계정의 세션 내 행위를 검증할 예정임.",
+      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.50)가 임계값(0.85) 미달",
+      "추가적인 웹 로그나 다른 계층의 데이터가 없어 현재 수집된 로그 범위 내에서는 최종 결론을 내리기 어려움.",
+      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.50)가 임계값(0.85) 미달",
+      "연속 2회 종료 거부 후에도 진전이 없어 강제 종료 턴으로 전환합니다."
+    ],
+    "evidence_layers": [
+      "auth"
     ]
   },
   {
     "run": 5,
-    "verdict": "FALSE_POSITIVE",
-    "confidence": 0.85,
-    "severity": "LOW",
+    "verdict": "INCONCLUSIVE",
+    "confidence": 0.5,
+    "severity": "MEDIUM",
     "tool_calls_count": 3,
-    "termination_reason": "confidence_sufficient",
-    "evidence_count": 3,
-    "summary": "외부 IP에서 존재하지 않는 계정 시도 후 정상 계정 'ubuntu'의 공개키 인증 성공 및 후속 명령어·네트워크 행위 부존재가 확인되어 정상적인 원격 관리 접근으로 판단됩니다.",
+    "termination_reason": "no_more_evidence",
+    "evidence_count": 2,
+    "summary": "존재하지 않는 계정 로그인 실패 직후 공개키 인증 성공이 관측되었으나, 후속 악성 행위나 추가 통신이 확인되지 않아 위협 여부를 확정하기 어렵습니다.",
     "investigation_notes": [
-      "fetch_audit_ログ 결과 확인 후 network 로그도 조회하여 외부 통신 여부 확인 필요",
-      "audit 로그에서 데이터가 확인되지 않았으므로 network 로그를 통해 외부 IP의 추가 통신 여부를 확인해야 합니다."
+      "인증 로그를 확인한 후 후속 audit 및 network 로그를 조회할 예정입니다.",
+      "공개키 인증은 사전에 등록된 키가 필요하므로 정상 인증일 가능성이 있으나, 직전의 계정 탐색 행위와의 연관성을 확인하기 위해 로그인 이후의 감사 로그(audit) 및 네트워크 활동(network)을 추가로 조사합니다.",
+      "네트워크 로그 조회를 통해 해당 IP의 추가 통신 여부를 확인한 뒤 최종 판단을 내릴 예정입니다.",
+      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.55)가 임계값(0.85) 미달",
+      "추가적인 웹 로그(fetch_web_log) 조회를 통해 해당 IP의 웹 애플리케이션 접근 여부를 확인하면 공격 연관성을 더 정확히 평가할 수 있습니다.",
+      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.60)가 임계값(0.85) 미달",
+      "연속 2회 종료 거부 후에도 진전이 없어 강제 종료 턴으로 전환합니다."
     ],
     "evidence_layers": [
       "auth",
-      "process",
-      "network"
+      "baseline"
     ]
   },
   {
     "run": 6,
     "verdict": "INCONCLUSIVE",
-    "confidence": 0.55,
+    "confidence": 0.5,
     "severity": "MEDIUM",
     "tool_calls_count": 3,
     "termination_reason": "no_more_evidence",
-    "evidence_count": 2,
-    "summary": "외부 IP에서 계정 탐색 시도 후 공개키 인증으로 로그인이 성공했으나, 후속 행위 및 네트워크 통신 기록이 없어 침해 여부를 확정할 수 없습니다.",
+    "evidence_count": 1,
+    "summary": "외부 IP에서 계정 탐색 시도 후 공개키 인증으로 정상 계정 로그인이 성공했으나, 추가적인 후속 악성 행위나 네트워크 통신이 관찰되지 않아 침해 여부를 단정하기 어렵습니다.",
     "investigation_notes": [
-      "auth 로그에서 공개키 인증 성공이 확인되었으나, 후속 audit 로그를 확인하여 실제 악성 행위 여부를 검증해야 함",
-      "네트워크 계층 조사를 통해 해당 IP의 추가 통신 여부를 확인한 뒤 최종 판단 예정",
-      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.55)가 임계값(0.85) 미달",
-      "더 이상 조회 가능한 관련 로그(auth, audit, network)가 남아있지 않으므로 추가 조사가 불가능합니다."
+      "auth 로그 확인 결과 공개키 인증 성공이 확인되었으나, 세션 내 실제 명령어 실행 여부를 확인하기 위해 audit 로그 조사가 필요함.",
+      "audit 로그에서 ubuntu 계정의 후속 명령이 확인되지 않았으므로 네트워크 로그를 통해 추가 통신 여부를 확인합니다.",
+      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.50)가 임계값(0.85) 미달",
+      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.50)가 임계값(0.85) 미달",
+      "연속 2회 종료 거부 후에도 진전이 없어 강제 종료 턴으로 전환합니다."
     ],
     "evidence_layers": [
-      "auth",
-      "audit"
+      "auth"
     ]
   },
   {
     "run": 7,
-    "verdict": "FALSE_POSITIVE",
-    "confidence": 0.9,
-    "severity": "LOW",
+    "verdict": "INCONCLUSIVE",
+    "confidence": 0.55,
+    "severity": "MEDIUM",
     "tool_calls_count": 3,
-    "termination_reason": "confidence_sufficient",
-    "evidence_count": 3,
-    "summary": "관리자의 단순 계정명 오타 후 등록된 공개키를 이용한 정상적인 원격 접속으로 확인되어 오탐으로 판정합니다.",
+    "termination_reason": "no_more_evidence",
+    "evidence_count": 1,
+    "summary": "외부 IP에서 존재하지 않는 계정 로그인 실패 후 정상 계정 공개키 인증 성공이 확인되었으나, 후속 악성 행위나 추가 통신이 관찰되지 않아 확정하기에 증거가 불충분합니다.",
     "investigation_notes": [
-      "auth 로그 확인 후 후속 행위 조사를 위해 fetch_audit_log 및 fetch_network_log를 연계하여 호출할 예정",
-      "audit 로그 조회를 통해 ubuntu 계정의 후속 행위를 확인한 뒤 최종 판정을 내릴 예정임.",
-      "네트워크 로그 조회를 통해 해당 IP의 추가 통신 여부를 확인한 후 최종 판단을 내릴 예정임",
-      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.75)가 임계값(0.85) 미달"
+      "이후 network 로그 및 audit 로그를 통해 후속 행위와 추가 통신 여부를 검증할 예정입니다.",
+      "fetch_audit_log 결과가 없어 user=ubuntu의 감사 기록을 다른 필터나 시간 범위로 재조회하거나 fetch_network_log를 통해 네트워크 활동을 확인해야 합니다.",
+      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.55)가 임계값(0.85) 미달",
+      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.55)가 임계값(0.85) 미달",
+      "연속 2회 종료 거부 후에도 진전이 없어 강제 종료 턴으로 전환합니다."
     ],
     "evidence_layers": [
-      "process",
-      "network",
-      "baseline"
+      "auth"
     ]
   },
   {
     "run": 8,
     "verdict": "FALSE_POSITIVE",
-    "confidence": 0.88,
+    "confidence": 0.85,
     "severity": "LOW",
     "tool_calls_count": 3,
-    "termination_reason": "confidence_sufficient",
-    "evidence_count": 4,
-    "summary": "존재하지 않는 계정 입력 시도 직후 발생한 로그인 성공은 사전 등록된 공개키를 통한 정상 관리자의 접근으로 확인되어 오탐으로 판정되었습니다.",
+    "termination_reason": "no_more_evidence",
+    "evidence_count": 0,
+    "summary": "존재하지 않는 계정 로그인 실패 직후 공개키 인증 성공이 발생했으나, 강력한 정상 인증 방식(공개키) 사용 및 후속 악성 행위의 부재가 확인되어 정상적인 원격 접속으로 판단됩니다.",
     "investigation_notes": [
-      "audit 로그 조회 후 network 로그도 함께 조회하여 외부 통신 여부를 확인할 예정입니다.",
-      "네트워크 로그 조회를 통해 해당 IP의 추가 통신 여부를 확인한 후 최종 결론을 도출할 예정입니다.",
-      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.75)가 임계값(0.85) 미달"
+      "auth 로그를 통해 로그인 실패 및 성공의 구체적인 패턴을 확인한 뒤 audit 및 network 로그를 차례로 조회할 예정입니다.",
+      "ubuntu 계정의 공개키 인증 성공이 확인되었으나, 공개키 인증은 사전에 등록된 키가 필요하므로 강한 정상 신호로 볼 수 있음. 다만 단일 실패 건이 존재하므로 후속 audit 로그를 통한 명령어 확인 필수.",
+      "audit 로그에서 ubuntu 계정의 활동이 확인되지 않아, 네트워크 로그를 통해 추가적인 통신 행위가 있었는지 확인 필요",
+      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.50)가 임계값(0.85) 미달",
+      "종료 관문 발동 — 종료 거부: 실제 신뢰도(0.50)가 임계값(0.85) 미달",
+      "연속 2회 종료 거부 후에도 진전이 없어 강제 종료 턴으로 전환합니다."
     ],
-    "evidence_layers": [
-      "auth",
-      "process",
-      "network",
-      "auth"
-    ]
+    "evidence_layers": []
   }
 ]

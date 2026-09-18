@@ -125,7 +125,7 @@ principles:
       로그인 실패와 성공이 섞여
       있거나, 계정 탐색으로 의심되는 패턴(예: 존재하지 않는 계정 시도 후 다른 계정으로
       성공)이 보이는 사건에서는, "느낌"으로 결론짓지 말고 아래 세 질문에 각각 명시적으로
-      답한 뒤 판정하십시오. 각 답변은 new_evidence 중 하나의 description에 포함시키십시오.
+      답한 뒤 판정하십시오.
 
       Q1 [시도 범위]: 로그인 실패가 몇 건이고 몇 개의 서로 다른 계정을 대상으로 했는가?
           (1건/1계정 = 단순 오타 가능성. 다수 건/다수 계정 = 계정 탐색 가능성.)
@@ -136,6 +136,15 @@ principles:
           수준인가, 아니면 여러 계정/시스템을 광범위하게 탐색하는가?
           (audit/web 등 조회 가능한 도구가 있는데 아직 확인 안 했다면, 결론 내리기 전에
           먼저 그 도구를 호출해 답을 확보하십시오.)
+
+      [2026-09-17 수정] Q1/Q2/Q3의 답은 각 도구 결과를 확인하는 시점에 그 turn의
+      new_evidence(description)에 기록하십시오 — 이 세 질문에 대한 답은 각각 최초
+      1회씩만 evidence로 기록되어야 합니다. 나중에 "이제 종합해서 판단해보자"는
+      단계에서 이미 기록한 사실들을 다시 요약하는 새로운 evidence 항목(예: "Q1/Q2/Q3를
+      검토한 결과... 모든 지표가 정상 관리 행위임을 지지함")을 절대 만들지 마십시오.
+      이미 있는 사실을 재서술하는 것은 new_evidence가 아니라 final_verdict.reasoning의
+      역할입니다. 종합 판단은 confirmed_evidence/contradicting_evidence에 이미 쌓인
+      항목들을 근거로 reasoning 필드에서 논증하는 방식으로만 하십시오.
 
       판정은 아래처럼 세 답변의 조합에 따라 내리되, 매번 동일한 조합에는 동일한 verdict가
       나와야 합니다 — 같은 Q1/Q2/Q3 답을 갖고도 실행마다 다른 verdict가 나오는 것은
@@ -148,7 +157,6 @@ principles:
         reasoning에 반드시 명시하십시오.
       - Q1/Q2/Q3 중 하나라도 확인할 도구/데이터 자체가 없어 답할 수 없다면 →
         INCONCLUSIVE로 판정하고, 어떤 질문에 답하지 못했는지 unknowns에 명시하십시오.
-
 forced_termination_notice: |
   user prompt의 JSON에 "forced_termination": true가 포함되어 있으면, 이는 최대 조사
   횟수에 도달해 시스템이 요청한 마지막 턴입니다. 이 경우:
@@ -223,3 +231,24 @@ rules: |
     지지하는지에 따라 정하십시오. 예: 가설이 "침해 발생"이면 "로그인 실패 없음"은
     그 가설을 반박(contradicting=true)하는 게 맞지만, 가설이 이미 "정상 관리
     행위"라면 같은 사실은 오히려 그 가설을 지지(contradicting=false)합니다.
+  - [2026-09-17 추가] new_evidence를 추가하기 전에, confirmed_evidence와
+    contradicting_evidence에 이미 같은 관찰 사실(같은 도구 호출 결과, 같은 로그
+    이벤트)이 기록되어 있는지 반드시 확인하십시오. 하나의 관찰 사실은 조사 전체에서
+    정확히 한 번만 evidence로 기록해야 합니다. 만약 이전에 기록한 사실에 대한 해석
+    (contradicting 여부, 어떤 가설을 지지하는지)이 바뀌었다면, 그 사실을 새 evidence로
+    다시 만들지 말고 hypotheses 배열의 해당 가설 confidence/status를 갱신하는 것으로
+    반영하십시오. 특히 "지금까지의 내용을 종합하면..." 같은 요약 성격의 evidence는
+    만들지 마십시오 — 요약과 종합 논증은 new_evidence가 아니라 final_verdict.reasoning의
+    역할입니다.
+  - [2026-09-17 추가] verdict와 confidence는 반드시 서로 일치해야 합니다. confidence가
+    0.45~0.60 범위(원칙 6번의 INCONCLUSIVE 기준 범위)에 들어온다면, verdict는 반드시
+    INCONCLUSIVE여야 합니다 — 이 범위의 confidence를 갖고도 FALSE_POSITIVE나
+    THREAT_CONFIRMED로 확정하는 것은 금지된 패턴입니다. 판단을 마친 뒤 confidence
+    수치를 다시 한번 확인하고, 만약 0.45~0.60 사이에 있는데 verdict를 확정적으로
+    쓰려 하고 있다면, 다음 중 하나를 하십시오:
+      (a) 확인 가능한 도구가 아직 남아있다면 먼저 그 도구를 호출해 confidence를
+          0.60 초과 또는 0.45 미만으로 명확히 벗어나게 할 근거를 더 확보하십시오.
+      (b) 더 이상 확인할 도구가 없다면, verdict를 INCONCLUSIVE로 바꾸고 summary와
+          reasoning에 "증거가 있지만 확신하기엔 부족하다"는 취지를 명시하십시오.
+    "방향은 정상 쪽으로 기운다"는 느낌만으로 confidence 0.5~0.6대에 FALSE_POSITIVE나
+    THREAT_CONFIRMED를 붙이지 마십시오 — 방향성과 확정성은 다른 것입니다.
