@@ -27,16 +27,16 @@ from agent.tools import build_default_registry
 load_dotenv()
 
 SEED = {
-    "incident_id": "CONSISTENCY-TEST-03",
+    "incident_id": "CONSISTENCY-TEST-04",
     "detection_source": "llm_triage",
-    "trigger_time": "2026-09-14T16:10:00+00:00",
-    "trigger_description": "외부 IP에서 ubuntu 계정 대상 비밀번호 브루트포스 성공 후 원격 스크립트 다운로드 및 실행 발생",
-    "confidence_initial": 0.7,
-    "severity_hint": "CRITICAL",
+    "trigger_time": "2026-09-14T18:05:00+00:00",
+    "trigger_description": "웹 애플리케이션 업로드 디렉터리에 PHP 파일 업로드 후 곧바로 명령 실행 파라미터로 접근 발생",
+    "confidence_initial": 0.65,
+    "severity_hint": "HIGH",
     "priority": 1,
     "host": "web-01",
-    "src_ip": "45.76.13.201",
-    "reasoning": "비밀번호 다회 실패 후 로그인 성공, 곧이어 외부에서 스크립트를 받아 실행하는 정황이 확인되어 침해 가능성이 매우 높습니다.",
+    "src_ip": "198.51.100.77",
+    "reasoning": "업로드 디렉터리에 PHP 파일이 생성된 직후 그 파일에 cmd 파라미터로 접근하는 패턴은 웹셸 업로드-실행 공격의 전형적인 시그니처입니다.",
 }
 
 RETRY_DELAY_RE = re.compile(r"retryDelay['\"]?:\s*['\"]?(\d+(?:\.\d+)?)s")
@@ -78,6 +78,8 @@ def run_once_with_retry(run_index: int, max_retries: int = 3) -> Dict[str, Any] 
                 # [2026-09-17 추가] 종료 관문이 실제로 발동했는지 확인하기 위한 필드
                 "investigation_notes": result.get("investigation_notes", []),
                 "evidence_layers": [e["layer"] for e in result.get("evidence_chain", [])],
+                # [2026-09-18 추가] 실제 tool 호출 인자를 확인하기 위해 저장
+                "tools_called": result.get("tools_called", []),
             }
         except Exception as exc:
             error_str = str(exc)

@@ -75,7 +75,15 @@ principles:
       audit↔auth는 pid로, web→audit/network는 같은 src_ip·시간대로 이어붙이는 것이 원칙입니다.
       각 계층에서 얻은 개별 사실들을 하나의 공격 시나리오(누가, 언제, 어떤 순서로)로 엮는 것이
       이 조사의 핵심 목표입니다 — 계층별로 따로따로 결론 내지 마십시오.
-
+      
+      [2026-09-18 추가] 어느 계층부터 조회할지는 seed의 trigger_description에 등장하는
+      단서를 보고 정하십시오. 업로드, URI, 파일 경로, HTTP 메서드, 웹 애플리케이션
+      등의 단어가 trigger_description에 있으면 fetch_web_log를 첫 도구로 선택하십시오
+      — auth 로그에는 웹 요청 관련 증거가 절대 나타나지 않습니다. 반대로 SSH, 로그인,
+      계정 등의 단어가 있으면 fetch_auth_log부터 시작하는 것이 맞습니다. auth/audit/
+      network 세 계층을 조회했는데 관련 증거가 전혀 안 나온다고 해서 곧바로 "증거가
+      없다"고 결론짓지 말고, seed의 단서가 가리키는 계층(web 등)을 아직 조회하지
+      않았다면 반드시 그 계층부터 조회하십시오.
   - id: 6
     title: audit 단독 증거의 함정
     text: |
