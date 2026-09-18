@@ -27,16 +27,16 @@ from agent.tools import build_default_registry
 load_dotenv()
 
 SEED = {
-    "incident_id": "CONSISTENCY-TEST-05",
+    "incident_id": "CONSISTENCY-TEST-07",
     "detection_source": "llm_triage",
-    "trigger_time": "2026-09-14T20:30:00+00:00",
-    "trigger_description": "정상 인증된 SSH 세션에서 민감 디렉터리 압축 및 외부 서버로의 대용량 데이터 전송 발생",
-    "confidence_initial": 0.6,
+    "trigger_time": "2026-09-14T22:30:00+00:00",
+    "trigger_description": "root 권한으로 SSH authorized_keys 파일 수정, crontab을 통한 주기적 외부 스크립트 실행 등록, 신규 관리자 계정(sysupdate) 생성이 연달아 발생",
+    "confidence_initial": 0.65,
     "severity_hint": "CRITICAL",
     "priority": 1,
-    "host": "{HOST}",
-    "src_ip": "{ATTACKER_IP}",
-    "reasoning": "정상 인증 이후 민감 디렉터리를 압축하고 외부 서버로 대용량 전송한 뒤 흔적을 삭제하려는 정황이 확인되어 데이터 유출 가능성이 높습니다.",
+    "host": "web-01",
+    "src_ip": None,
+    "reasoning": "root 권한 세션에서 authorized_keys 수정, crontab 백도어 등록, 신규 계정 생성이 짧은 시간 내 연이어 발생해 지속적 재접속 경로 확보(persistence) 정황이 강하게 의심됩니다.",
 }
 
 RETRY_DELAY_RE = re.compile(r"retryDelay['\"]?:\s*['\"]?(\d+(?:\.\d+)?)s")
