@@ -111,6 +111,13 @@ class GeminiClient:
                 f"Gemini가 빈 응답을 반환했습니다. (finish_reason 등을 확인하십시오)\n원본 응답: {response}"
             )
         return self._parse_json(text)
+    
+    # [2026-09-18 추가] LLM이 가끔 JSON 응답 중간에 markdown 리스트 문법
+    # (`- key: value`처럼 키 앞에 하이픈이 붙고 따옴표가 빠진 형태)을 섞어 넣어
+    # json.loads()가 실패하는 사례가 발견됐다. 기존 trailing comma 보정으로는
+    # 못 잡는 새로운 유형이라, 이 패턴을 정규식으로 감지해 정상 JSON 키 형태로
+    # 복구하는 보정 단계를 추가했다.
+    _MARKDOWN_BULLET_KEY_RE = re.compile(r'(?m)^(\s*)-\s*"?([A-Za-z_][A-Za-z0-9_]*)"?\s*:')
 
     @staticmethod
     def _parse_json(text: str) -> Dict[str, Any]:
@@ -120,15 +127,22 @@ class GeminiClient:
             if cleaned.startswith("json"):
                 cleaned = cleaned[4:]
             cleaned = cleaned.strip()
+
         try:
             return json.loads(cleaned)
         except json.JSONDecodeError as exc:
+            # 1차 보정: trailing comma 제거
             fixed = re.sub(r",\s*([\]}])", r"\1", cleaned)
+            # 2차 보정: markdown 리스트 문법으로 깨진 키(`- key:` → `"key":`) 복구.
+            # 두 보정을 순서대로 누적 적용해서, 두 문제가 같이 섞여 나온 경우도 처리한다.
+            fixed = GeminiClient._MARKDOWN_BULLET_KEY_RE.sub(r'\1"\2":', fixed)
+
             if fixed != cleaned:
                 try:
                     return json.loads(fixed)
                 except json.JSONDecodeError:
                     pass
+
             raise GeminiDecisionError(
                 f"Gemini 응답을 JSON으로 파싱하지 못했습니다: {exc}\n원본 응답:\n{text}"
             ) from exc
