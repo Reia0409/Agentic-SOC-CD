@@ -27,17 +27,19 @@ from agent.tools import build_default_registry
 load_dotenv()
 
 SEED = {
-    "incident_id": "INC-001",
+    "incident_id": "CONSISTENCY-TEST-05",
     "detection_source": "llm_triage",
-    "trigger_time": "2026-09-14T15:20:47+00:00",
-    "trigger_description": "외부 IP에서 SSH 공개키 로그인 성공 후 /etc/passwd 접근 및 감사 로그 조회 행위 발생",
-    "confidence_initial": 0.65,
-    "severity_hint": "HIGH",
+    "trigger_time": "2026-09-14T20:30:00+00:00",
+    "trigger_description": "정상 인증된 SSH 세션에서 민감 디렉터리 압축 및 외부 서버로의 대용량 데이터 전송 발생",
+    "confidence_initial": 0.6,
+    "severity_hint": "CRITICAL",
     "priority": 1,
     "host": "web-01",
-    "src_ip": "112.148.16.1",
-    "reasoning": "외부 IP(112.148.16.1)를 통한 SSH 로그인 직후 sudo 권한으로 민감한 파일(/etc/passwd)을 반복 조회하고 시스템 감사 로그를 확인한 정황이 포착됨.",
+    "src_ip": "91.203.6.44",
+    "reasoning": "정상 인증 이후 민감 디렉터리를 압축하고 외부 서버로 대용량 전송한 뒤 흔적을 삭제하려는 정황이 확인되어 데이터 유출 가능성이 높습니다.",
 }
+
+
 
 RETRY_DELAY_RE = re.compile(r"retryDelay['\"]?:\s*['\"]?(\d+(?:\.\d+)?)s")
 
