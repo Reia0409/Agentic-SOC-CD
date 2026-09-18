@@ -27,16 +27,16 @@ from agent.tools import build_default_registry
 load_dotenv()
 
 SEED = {
-    "incident_id": "CONSISTENCY-TEST-02",
+    "incident_id": "CONSISTENCY-TEST-03",
     "detection_source": "llm_triage",
-    "trigger_time": "2026-09-14T07:36:17+00:00",
-    "trigger_description": "동일 외부 IP에서 존재하지 않는 계정(test) 로그인 실패 직후, 같은 IP로 정상 계정(ubuntu) 공개키 인증 성공 발생",
-    "confidence_initial": 0.6,
-    "severity_hint": "MEDIUM",
+    "trigger_time": "2026-09-14T16:10:00+00:00",
+    "trigger_description": "외부 IP에서 ubuntu 계정 대상 비밀번호 브루트포스 성공 후 원격 스크립트 다운로드 및 실행 발생",
+    "confidence_initial": 0.7,
+    "severity_hint": "CRITICAL",
     "priority": 1,
     "host": "web-01",
-    "src_ip": "203.230.195.21",
-    "reasoning": "존재하지 않는 계정으로 먼저 로그인을 시도한 직후, 같은 IP가 정상 계정으로 인증에 성공한 패턴이 확인되어 계정 탐색 후 침해 성공 가능성이 의심됩니다.",
+    "src_ip": "45.76.13.201",
+    "reasoning": "비밀번호 다회 실패 후 로그인 성공, 곧이어 외부에서 스크립트를 받아 실행하는 정황이 확인되어 침해 가능성이 매우 높습니다.",
 }
 
 RETRY_DELAY_RE = re.compile(r"retryDelay['\"]?:\s*['\"]?(\d+(?:\.\d+)?)s")
