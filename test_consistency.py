@@ -27,16 +27,16 @@ from agent.tools import build_default_registry
 load_dotenv()
 
 SEED = {
-    "incident_id": "CONSISTENCY-TEST-04",
+    "incident_id": "CONSISTENCY-TEST-05",
     "detection_source": "llm_triage",
-    "trigger_time": "2026-09-14T18:05:00+00:00",
-    "trigger_description": "웹 애플리케이션 업로드 디렉터리에 PHP 파일 업로드 후 곧바로 명령 실행 파라미터로 접근 발생",
-    "confidence_initial": 0.65,
-    "severity_hint": "HIGH",
+    "trigger_time": "2026-09-14T20:30:00+00:00",
+    "trigger_description": "정상 인증된 SSH 세션에서 민감 디렉터리 압축 및 외부 서버로의 대용량 데이터 전송 발생",
+    "confidence_initial": 0.6,
+    "severity_hint": "CRITICAL",
     "priority": 1,
-    "host": "web-01",
-    "src_ip": "198.51.100.77",
-    "reasoning": "업로드 디렉터리에 PHP 파일이 생성된 직후 그 파일에 cmd 파라미터로 접근하는 패턴은 웹셸 업로드-실행 공격의 전형적인 시그니처입니다.",
+    "host": "{HOST}",
+    "src_ip": "{ATTACKER_IP}",
+    "reasoning": "정상 인증 이후 민감 디렉터리를 압축하고 외부 서버로 대용량 전송한 뒤 흔적을 삭제하려는 정황이 확인되어 데이터 유출 가능성이 높습니다.",
 }
 
 RETRY_DELAY_RE = re.compile(r"retryDelay['\"]?:\s*['\"]?(\d+(?:\.\d+)?)s")
