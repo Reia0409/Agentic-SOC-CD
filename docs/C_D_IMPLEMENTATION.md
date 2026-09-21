@@ -1,6 +1,6 @@
 # C·D 구현 및 팀 연동 안내
 
-작업 브랜치: `codex/event-window-raw-ref`  
+작업 브랜치: `event-window-raw-ref`  
 기준 브랜치: `feature/Agentic-SOC-Investigation-Agent` (`b72c1e4`)
 
 `main`에는 README만 있으므로 실제 조사 에이전트가 있는 브랜치에서 작업했다.
