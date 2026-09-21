@@ -25,45 +25,15 @@ warnings에 이런 한계를 항상 명시한다.
 
 from __future__ import annotations
 
-import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
-from ..parsers.audit_parser import parse_audit_events
 from ..parsers.process_tree import build_ancestry_chain
-from ._s3_common import daterange, list_and_read_text
 from ..time_utils import parse_iso
+from ..log_source import read_documents, normalize_documents, event_time
 
 DEFAULT_BUCKET = "ogwanwan-shop-bucket"
 DEFAULT_LOOKBACK_HOURS = 24  # 조상을 찾을 때 얼마나 과거까지 audit 로그를 훑을지
-
-
-def _read_source_text(host: str, start: datetime, end: datetime) -> "tuple[str, int, str]":
-    """fetch_audit_log.py와 동일한 소스(AUDIT_LOG_LOCAL_PATH 또는 S3)를 읽는다."""
-    local_path = os.environ.get("AUDIT_LOG_LOCAL_PATH")
-    if local_path:
-        if not os.path.exists(local_path):
-            return "", 0, f"local:{local_path} (파일 없음)"
-        with open(local_path, "r", encoding="utf-8", errors="replace") as f:
-            return f.read(), 1, f"local:{local_path}"
-
-    import boto3  # 실제 호출 시에만 필요하므로 지연 import
-
-    bucket = os.environ.get("AUDIT_LOG_BUCKET", DEFAULT_BUCKET)
-    s3 = boto3.client("s3", region_name=os.environ.get("AWS_DEFAULT_REGION"))
-
-    chunks: List[str] = []
-    scanned_objects = 0
-    for date_str in daterange(start, end):
-        prefix = f"raw/source_type=auditd/host={host}/dt={date_str}/"
-        text, count = list_and_read_text(s3, bucket, prefix)
-        scanned_objects += count
-        chunks.append(text)
-    return (
-        "\n".join(chunks),
-        scanned_objects,
-        f"s3://{bucket}/raw/source_type=auditd/host={host}/",
-    )
 
 
 def get_process_tree(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -85,9 +55,11 @@ def get_process_tree(args: Dict[str, Any]) -> Dict[str, Any]:
         end = datetime.now(timezone.utc)
         start = end - timedelta(hours=DEFAULT_LOOKBACK_HOURS)
 
-    text, scanned_objects, source_label = _read_source_text(host, start, end)
-
-    events = parse_audit_events(text)  # 필터 없이 전부 파싱해서 pid/ppid 관계를 다 확보
+    documents = read_documents("audit", host, start, end)
+    scanned_objects = len(documents)
+    source_label = ", ".join(doc.source for doc in documents)
+    events = [event for event in normalize_documents("audit", documents, start, end)
+              if (ts := event_time(event)) is not None and start <= ts <= end]
 
     chain = build_ancestry_chain(events, target_pid=pid)
 

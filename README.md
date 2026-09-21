@@ -1,5 +1,20 @@
 # Agentic-SOC
 
+## C·D: 사건 Window 조회와 원본 참조 추적
+
+`codex/event-window-raw-ref` 브랜치에 `fetch_event_logs` 도구와 `raw_ref` 전달·검증을
+추가했습니다. [구현 설명과 팀 연동 계약](docs/C_D_IMPLEMENTATION.md)을 참고하세요.
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest -q
+python -m scripts.demo_event_window
+```
+
+위 테스트·데모는 API 키 없이 실행되며, 데모 결과는 `results/cd_demo.json`에 저장됩니다.
+기존 실행·설명은 아래와 같습니다. 로컬 수집의 `RAW_LOG_LOCAL_MAX_LINES`는 이제
+원본 줄 번호와 audit 조립을 보존하기 위해 마지막 N개 완성 이벤트를 제한합니다.
+
 "에이전트개발-9/9" 문서의 조사 에이전트 설계를 파이썬으로 구현한 것입니다.
 Triage/감지 에이전트가 파이프라인에서 빠지면서, raw log를 직접 받아 LLM이
 스스로 seed를 생성하고 우선순위를 매긴 뒤 심층 조사까지 하는 구조로 확장했습니다.

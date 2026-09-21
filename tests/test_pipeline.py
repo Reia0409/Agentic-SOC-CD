@@ -59,10 +59,13 @@ class _FakeCombinedLLMClient:
         self.reason_call_count = 0
 
     def complete_json(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
+        payload = json.loads(user_prompt.split("\n\n", 1)[1])
+        refs = [record["raw_ref"] for record in payload["raw_logs"]]
         return {
             "candidates": [
                 {
                     "incident_id": "INC-LOW",
+                    "evidence_refs": refs,
                     "trigger_time": "2026-09-09T10:00:00Z",
                     "trigger_description": "낮은 우선순위 후보",
                     "confidence_initial": 0.4,
@@ -71,6 +74,7 @@ class _FakeCombinedLLMClient:
                 },
                 {
                     "incident_id": "INC-HIGH",
+                    "evidence_refs": refs,
                     "trigger_time": "2026-09-09T10:05:00Z",
                     "trigger_description": "높은 우선순위 후보",
                     "confidence_initial": 0.6,
@@ -80,7 +84,7 @@ class _FakeCombinedLLMClient:
             ]
         }
 
-    def reason(self, state: Any, tool_registry: Any) -> Dict[str, Any]:
+    def reason(self, state: Any, tool_registry: Any, **kwargs: Any) -> Dict[str, Any]:
         self.reason_call_count += 1
         return {
             "facts": [],

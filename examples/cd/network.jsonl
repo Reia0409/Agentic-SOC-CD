@@ -1,0 +1,1 @@
+{"timestamp":"2026-09-21T00:00:40Z","event_type":"flow","src_ip":"192.0.2.10","dest_ip":"192.0.2.20","src_port":4000,"dest_port":443,"proto":"TCP"}

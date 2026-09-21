@@ -34,6 +34,9 @@ SEED_SYSTEM_PROMPT = """\
 5. confidence_initial은 "이게 진짜 위협일 확률"에 대한 초기 추정치입니다(0~1).
    이후 조사 에이전트가 실제 증거를 더 모아서 이 값을 갱신합니다 — 여기서는
    과도하게 확신하지 마십시오 (일반적으로 0.3~0.7 사이가 됩니다).
+6. evidence_refs에는 후보 근거 로그의 raw_ref/raw_refs를 원문 그대로 복사하십시오.
+   입력에 원본 참조가 있으면 최소 한 개 이상 필수이며 새 참조를 만들지 마십시오.
+   window는 해당 후보를 조사할 [시작 ISO8601, 끝 ISO8601] 구간입니다.
 
 ## 출력 형식
 반드시 아래 JSON 객체 하나만 출력하십시오. 다른 설명, 마크다운, 코드펜스 금지.
@@ -44,6 +47,8 @@ SEED_SYSTEM_PROMPT = """\
       "incident_id": "INC-<짧은 식별자>",
       "detection_source": "llm_triage",
       "trigger_time": "ISO8601 (후보의 근거가 된 로그 중 가장 이른 시각)",
+      "window": ["시작 ISO8601", "끝 ISO8601"],
+      "evidence_refs": ["입력 로그의 raw_ref 원문"],
       "trigger_description": "한 줄 요약 (예: 'admin 계정 로그인 실패 다수 발생')",
       "confidence_initial": 0.0,
       "severity_hint": "LOW|MEDIUM|HIGH|CRITICAL",

@@ -118,10 +118,18 @@ def build_default_registry(
 
     tool_defs = [
         ToolSpec(
+            "fetch_event_logs",
+            "사건 event/window로 원본 로그를 직접 조회한다. window=[시작,끝] 또는 "
+            "event의 timestamp/window 필요. layers로 여러 계층 조회 가능. "
+            "filters는 계층별 조건이며 raw_ref/raw_refs를 그대로 증거에 인용한다.",
+            ["host"],
+            ["event", "window", "layers", "filters", "before_seconds", "after_seconds", "limit", "offset"],
+        ),
+        ToolSpec(
             "fetch_web_log",
             "어떤 웹 요청이 있었는지 조회한다",
             ["host", "start_time", "end_time"],
-            ["path", "src_ip", "method"],
+            ["path", "src_ip", "method", "status_code", "limit", "offset"],
         ),
         ToolSpec(
             "fetch_auth_log",
@@ -135,7 +143,7 @@ def build_default_registry(
             "파일 생성·변조·명령 실행이 있었는지 조회한다 "
             "(uid/euid/session_type/exec_args/target_file까지 구조화해서 반환)",
             ["host", "start_time", "end_time"],
-            ["event_type", "pid", "ppid", "user", "serial", "exclude_interactive"],
+            ["event_type", "pid", "ppid", "user", "serial", "exclude_interactive", "include_user_cmd", "limit", "offset"],
         ),
         ToolSpec(
             "fetch_network_log",

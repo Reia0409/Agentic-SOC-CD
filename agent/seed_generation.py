@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from .seed_prompts import SEED_SYSTEM_PROMPT, build_seed_user_prompt
+from .provenance import references
 
 # [11] agent/pipeline.py에서 실행됨
 #     구조화된 로그를 LLM한테 보여줘서 seed 후보 리스트 뽑음
@@ -34,6 +35,13 @@ class SeedGenerator:
         decision = self.llm_client.complete_json(SEED_SYSTEM_PROMPT, user_prompt)
         
         candidates = decision.get("candidates") or []
+        known = {ref for record in raw_logs for ref in references(record)}
+        for candidate in candidates:
+            refs = references(candidate, seed=True)
+            if known and (not refs or set(refs) - known):
+                raise ValueError("seed evidence_refs must cite references from the input logs")
+            if refs:
+                candidate["evidence_refs"] = refs
         # priority가 없거나 이상한 값이면 가장 낮은 우선순위(맨 뒤)로 보낸다.
         candidates.sort(key=lambda c: c.get("priority", 999))
 

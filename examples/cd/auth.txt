@@ -1,0 +1,1 @@
+Sep 21 00:00:20 web-01 sshd[100]: Accepted password for demo from 192.0.2.10 port 4000 ssh2

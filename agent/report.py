@@ -15,6 +15,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+from .provenance import provenance_report
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -43,6 +45,8 @@ def build_investigation_result(
             "supporting_hypothesis": e.supporting_hypothesis,
             "confidence_contribution": e.confidence_contribution,
             "source_log": e.source_log,
+            "raw_ref": e.raw_refs[0] if e.raw_refs else None,
+            "raw_refs": list(e.raw_refs),
         }
         for e in state.evidence
     ]
@@ -55,6 +59,9 @@ def build_investigation_result(
             "description": e.description,
             "confidence_reduction": abs(e.confidence_contribution),
             "explanation": e.description,
+            "source_log": e.source_log,
+            "raw_ref": e.raw_refs[0] if e.raw_refs else None,
+            "raw_refs": list(e.raw_refs),
         }
         for e in state.contradicting_evidence
     ]
@@ -66,6 +73,8 @@ def build_investigation_result(
             "input": t.input,
             "result_count": t.result_count,
             "result_summary": t.result_summary,
+            "raw_refs": list(t.raw_refs),
+            "queried_layers": list(t.queried_layers),
             **({"error": t.error} if not t.success else {}),
         }
         for t in state.tool_calls
@@ -105,6 +114,8 @@ def build_investigation_result(
         "investigation_status": "COMPLETE",
         "timestamp": _now_iso(),
         "initial_seed": state.seed,
+        "raw_refs": list(state.raw_refs),
+        "provenance": provenance_report(state),
         "hypothesis": {
             "title": leading_hyp.title if leading_hyp else None,
             "description": leading_hyp.description if leading_hyp else None,
@@ -187,6 +198,8 @@ def format_text_report(result: Dict[str, Any]) -> str:
         for ev in all_evidence:
             label = _source_label(ev)
             lines.append(f"E{ev.get('sequence', '?')} [{label}] {ev['description']}")
+            if ev.get("raw_refs"):
+                lines.append("  원본: " + ", ".join(ev["raw_refs"]))
         lines.append("")
 
     timeline = result.get("attack_timeline") or []
@@ -210,5 +223,6 @@ def format_text_report(result: Dict[str, Any]) -> str:
     lines.append("")
 
     lines.append(f"Investigation Confidence {verdict.get('confidence', 0):.2f}")
+    lines.append("Raw reference validation: " + result.get("provenance", {}).get("status", "unavailable"))
 
     return "\n".join(lines)

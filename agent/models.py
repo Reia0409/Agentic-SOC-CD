@@ -47,6 +47,7 @@ class Evidence:
     supporting_hypothesis: List[str] = field(default_factory=list)
     contradicting_hypothesis: List[str] = field(default_factory=list)
     confidence_contribution: float = 0.0
+    raw_refs: List[str] = field(default_factory=list)
 
     @classmethod
     def new(cls, sequence: int, **kwargs: Any) -> "Evidence":
@@ -73,6 +74,8 @@ class ToolCallRecord:
     success: bool = True
     error: Optional[str] = None
     timestamp: str = field(default_factory=_now_iso)
+    raw_refs: List[str] = field(default_factory=list)
+    queried_layers: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -113,6 +116,9 @@ class AgentState:
     # 직전 tool call 결과 중 아직 LLM이 해석(증거화)하지 않은 원본 결과.
     # 매 reason() 호출 뒤 loop.py에서 비운다.
     pending_observations: List[Dict[str, Any]] = field(default_factory=list)
+    raw_refs: List[str] = field(default_factory=list)
+    provenance_issues: List[Dict[str, Any]] = field(default_factory=list)
+    raw_ref_groups: Dict[str, List[str]] = field(default_factory=dict)
 
     # [0917 희진] _to_hashable 메소드 추가
     @staticmethod

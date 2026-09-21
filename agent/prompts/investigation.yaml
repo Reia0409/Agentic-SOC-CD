@@ -216,6 +216,7 @@ output_schema: |
         "layer": "web|auth|process|network|baseline",
         "event_type": "...",
         "source_log": "...",
+        "raw_refs": ["도구 records 또는 seed에서 받은 raw_ref 원문"],
         "time": "ISO8601 또는 null",
         "supporting_hypothesis": ["H1"],
         "contradicting_hypothesis": [],
@@ -242,6 +243,13 @@ output_schema: |
   }
 
 rules: |
+  - 사건 seed의 window 또는 timestamp/trigger_time으로 조회할 때 fetch_event_logs를 사용할 수 있습니다.
+    host는 수집 대상 서버이며 layers에는 web/auth/audit/network를 지정합니다. system은 audit의 별칭입니다.
+    필터는 filters={"web":{"src_ip":"..."},"audit":{"pid":123}}처럼 계층별로 전달하십시오.
+  - new_evidence.raw_refs에는 해당 사실의 근거가 된 로그의 raw_ref/raw_refs만 원문 그대로 복사하십시오.
+    audit처럼 여러 줄로 조립된 이벤트는 raw_refs 전체를 보존하십시오. known_raw_refs에 없는 참조를
+    만들거나 수정하지 마십시오. source_log는 설명용 이름이며 raw_refs를 대신하지 않습니다.
+    조회 결과가 0건이라는 사실은 원본 로그 참조가 없으므로 unknowns/investigation_notes에 기록하십시오.
   - next_action이 "call_tool"이면 tool_call을 채우고 termination_reason과 final_verdict는 null로 두십시오.
     attack_timeline은 이 단계에서는 빈 배열([])로 두십시오.
   - next_action이 "terminate"이면 termination_reason과 final_verdict를 채우고 tool_call은 null로 두십시오.

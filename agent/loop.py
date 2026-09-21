@@ -43,6 +43,7 @@ from typing import Any, Dict
 
 from .models import AgentState, Evidence, Hypothesis, TerminationReason, ToolCallRecord, VerdictType
 from .report import build_investigation_result
+from .provenance import observed_references, observed_reference_groups, references, validate_citations
 from .tools import ToolRegistry, ToolValidationError
 
 # [17] seed 하나당 이 루프가 "충분하다" 판단이 나올 때까지 반복됨
@@ -63,6 +64,7 @@ class InvestigationAgent:
         # [18] agent/models.py 에서 AgentState 실행하여 state 객체 생성
         #      state = 지금까지의 조사 결과 기록하는 곳
         state = AgentState(incident_id=seed["incident_id"], seed=seed)
+        state.raw_refs = references(seed, seed=True)
         state.current_confidence = float(seed.get("confidence_initial", 0.5))
         state.record_confidence("initial", seed.get("trigger_description", "Triage 판정"))
 
@@ -107,11 +109,12 @@ class InvestigationAgent:
                 if termination_reason == TerminationReason.CONFIDENCE_SUFFICIENT.value:
                     confidence_not_met = state.current_confidence < self.confidence_threshold
                     successful_tool_names = {t.tool_name for t in state.tool_calls if t.success}
-                    distinct_tools_used = len(successful_tool_names)
+                    queried_layers = {layer for t in state.tool_calls for layer in t.queried_layers}
+                    distinct_tools_used = max(len(successful_tool_names), len(queried_layers))
                     single_layer_only = distinct_tools_used <= 1
 
                     seed_has_src_ip = bool(state.seed.get("src_ip"))
-                    network_tool_used = "fetch_network_log" in successful_tool_names
+                    network_tool_used = "fetch_network_log" in successful_tool_names or "network" in queried_layers
                     missing_network_check = seed_has_src_ip and not network_tool_used
 
                     if confidence_not_met or single_layer_only or missing_network_check:
@@ -160,6 +163,7 @@ class InvestigationAgent:
                     termination_reason == TerminationReason.NO_MORE_EVIDENCE.value
                     and state.seed.get("src_ip")
                     and "fetch_network_log" not in {t.tool_name for t in state.tool_calls if t.success}
+                    and not any("network" in t.queried_layers for t in state.tool_calls)
                 ):
                     state.notes.append(
                         "⚠ src_ip가 있는 사건이 network 계층 확인 없이 no_more_evidence로 종료됨 — 검토 권장"
@@ -280,6 +284,21 @@ class InvestigationAgent:
             contradicting = bool(ev.get("contradicting", False))
             contribution = float(ev.get("confidence_contribution", 0.0))
             sequence = len(state.evidence) + len(state.contradicting_evidence) + 1
+            try:
+                raw_refs, unknown_refs = validate_citations(ev, state.raw_refs)
+            except ValueError as exc:
+                raw_refs, unknown_refs = [], []
+                contribution = 0.0
+                state.provenance_issues.append({"sequence": sequence, "error": str(exc)})
+            if unknown_refs:
+                contribution = 0.0
+                state.provenance_issues.append({"sequence": sequence, "unknown_raw_refs": unknown_refs})
+            raw_refs = list(dict.fromkeys(source for ref in raw_refs
+                                          for source in state.raw_ref_groups.get(ref, [ref])))
+            if not raw_refs and state.raw_refs:
+                # An uncited claim cannot change confidence in a tracked run.
+                contribution = 0.0
+                state.notes.append(f"증거 {sequence}: 유효한 raw_ref가 없어 신뢰도 기여를 제외했습니다.")
             evidence = Evidence.new(
                 sequence=sequence,
                 time=ev.get("time"),
@@ -290,6 +309,7 @@ class InvestigationAgent:
                 supporting_hypothesis=ev.get("supporting_hypothesis", []),
                 contradicting_hypothesis=ev.get("contradicting_hypothesis", []),
                 confidence_contribution=contribution,
+                raw_refs=raw_refs,
             )
             state.add_evidence(evidence, contradicting=contradicting)
 
@@ -310,6 +330,11 @@ class InvestigationAgent:
     def _execute_tool_call(self, state: AgentState, tool_call: Dict[str, Any]) -> None:
         name = tool_call.get("tool_name")
         args = tool_call.get("args") or {}
+        if name == "fetch_event_logs":
+            args = dict(args)
+            args.setdefault("host", state.seed.get("host"))
+            if "event" not in args and "window" not in args:
+                args["event"] = state.seed
 
         if not name:
             state.notes.append("LLM이 next_action=call_tool을 선택했지만 tool_call을 채우지 않았습니다.")
@@ -325,6 +350,12 @@ class InvestigationAgent:
             # [30] ★진짜 tool 함수 실행 agent/tools/registry.py의 call 함수 실행
             # [37] agent/tools/registry.py로부터 조사 결과 반환
             result = self.tool_registry.call(name, args)
+            raw_refs = observed_references(result)
+            state.raw_refs = list(dict.fromkeys(state.raw_refs + raw_refs))
+            for ref, group in observed_reference_groups(result).items():
+                state.raw_ref_groups[ref] = list(dict.fromkeys(state.raw_ref_groups.get(ref, []) + group))
+            queried_layers = [layer for layer in result.get("layer_counts", {})
+                              if layer not in result.get("errors", {})]
             # [38] 이 도구 + 이 조건 조합은 이미 썼다고 표시 (중복 방지)
             state.mark_called(name, args)
             state.tool_calls.append(
@@ -334,7 +365,10 @@ class InvestigationAgent:
                     input=args,
                     result_count=result.get("count", 0),
                     result_summary=result.get("summary", ""),
-                    success=True,
+                    success=not bool(result.get("error") or result.get("partial")),
+                    error=result.get("error") or (str(result["errors"]) if result.get("partial") else None),
+                    raw_refs=raw_refs,
+                    queried_layers=queried_layers,
                 )
             )
 

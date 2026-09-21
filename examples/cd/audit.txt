@@ -1,0 +1,2 @@
+type=SYSCALL msg=audit(1789948830.100:42): pid=200 ppid=100 syscall=59 uid=1000 comm="id" exe="/usr/bin/id"
+type=EXECVE msg=audit(1789948830.100:42): argc=1 a0="id"

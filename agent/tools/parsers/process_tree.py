@@ -98,6 +98,7 @@ def build_ancestry_chain(
                 "syscall": n.get("syscall"),
                 "session_type": n.get("session_type"),
                 "raw_ref": n.get("raw_ref"),
+                "raw_refs": n.get("raw_refs", []),
             }
             for n in chain
         ],

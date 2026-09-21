@@ -111,11 +111,12 @@ def build_user_prompt(
                 "layer": e.layer,
                 "description": e.description,
                 "confidence_contribution": e.confidence_contribution,
+                "raw_refs": e.raw_refs,
             }
             for e in state.evidence
         ],
         "contradicting_evidence": [
-            {"evidence_id": e.evidence_id, "layer": e.layer, "description": e.description}
+            {"evidence_id": e.evidence_id, "layer": e.layer, "description": e.description, "raw_refs": e.raw_refs}
             for e in state.contradicting_evidence
         ],
         "current_confidence": round(state.current_confidence, 3),
@@ -129,6 +130,8 @@ def build_user_prompt(
         ],
         "investigated_layers": sorted(state.investigated_layers),
         "raw_observations_since_last_turn": state.pending_observations,
+        "known_raw_refs": state.raw_refs,
+        "provenance_issues": state.provenance_issues,
         "tool_calls_used": len(state.tool_calls),
     }
 
